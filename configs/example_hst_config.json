@@ -1,0 +1,50 @@
+{
+  "model_type": "HST",
+  "description": "Example configuration for HST (HybridSensorTransformer) model",
+  "signals": {
+    "boundary": [
+      "sensor_temperature_1",
+      "sensor_pressure_1",
+      "sensor_flow_1",
+      "sensor_speed_1"
+    ],
+    "target": [
+      "sensor_quality_1",
+      "sensor_vibration_1",
+      "sensor_temperature_internal"
+    ],
+    "temporal": [
+      "sensor_vibration_1",
+      "sensor_temperature_internal"
+    ]
+  },
+  "data_split": {
+    "test_size": 0.2,
+    "val_size": 0.2,
+    "random_state": 42
+  },
+  "model_architecture": {
+    "d_model": 64,
+    "nhead": 4,
+    "num_layers": 2,
+    "dropout": 0.1,
+    "gain": 0.1
+  },
+  "hst_specific": {
+    "context_window": 5,
+    "apply_smoothing": true,
+    "use_temporal": true
+  },
+  "training": {
+    "epochs": 100,
+    "batch_size": 64,
+    "lr": 0.001,
+    "weight_decay": 1e-5,
+    "grad_clip": 1.0,
+    "early_stop_patience": 25
+  },
+  "scheduler": {
+    "patience": 10,
+    "factor": 0.5
+  }
+}

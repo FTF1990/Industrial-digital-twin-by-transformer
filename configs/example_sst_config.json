@@ -1,0 +1,39 @@
+{
+  "model_type": "SST",
+  "description": "Example configuration for SST (StaticSensorTransformer) model",
+  "signals": {
+    "boundary": [
+      "sensor_temperature_1",
+      "sensor_pressure_1",
+      "sensor_flow_1",
+      "sensor_speed_1"
+    ],
+    "target": [
+      "sensor_quality_1",
+      "sensor_vibration_1"
+    ]
+  },
+  "data_split": {
+    "test_size": 0.2,
+    "val_size": 0.2,
+    "random_state": 42
+  },
+  "model_architecture": {
+    "d_model": 128,
+    "nhead": 8,
+    "num_layers": 3,
+    "dropout": 0.1
+  },
+  "training": {
+    "epochs": 100,
+    "batch_size": 64,
+    "lr": 0.001,
+    "weight_decay": 1e-5,
+    "grad_clip": 1.0,
+    "early_stop_patience": 25
+  },
+  "scheduler": {
+    "patience": 10,
+    "factor": 0.5
+  }
+}
