@@ -1,10 +1,15 @@
 """
-StaticSensorTransformer (SST): Static Sensor Mapping Transformer
+StaticSensorTransformer (SST): Sensor Sequence Transformer
 
-This module implements a static Transformer model for mapping boundary sensor
-measurements to target sensor predictions in industrial digital twin applications.
+This module implements a novel Transformer architecture that treats fixed sensor arrays
+as sequences, replacing traditional token/word sequences in NLP. This innovation enables
+spatial relationship learning between sensors in industrial digital twin applications.
 
-Formerly known as V1 or CompactSensorTransformer in earlier versions.
+Key Innovation:
+- Sensors as Sequence Elements: Unlike NLP where tokens represent words, here each
+  position represents a physical sensor with learned positional embeddings.
+- Spatial Attention: Multi-head attention captures complex sensor inter-dependencies.
+- Industrial-Specific Design: Optimized for boundary-to-target sensor mapping.
 """
 
 import torch
@@ -13,32 +18,59 @@ import torch.nn as nn
 
 class StaticSensorTransformer(nn.Module):
     """
-    StaticSensorTransformer (SST): 静态传感器映射Transformer
+    StaticSensorTransformer (SST): Sensor Sequence Transformer
 
-    A Transformer architecture designed for static sensor-to-sensor mapping
-    in complex industrial systems. This model learns spatial relationships between
-    boundary condition sensors and target sensors without temporal dependencies.
+    革新性架构 - 将固定传感器序列替代传统Transformer的语料序列
 
-    This model is ideal for steady-state systems where sensor relationships
-    are primarily spatial rather than temporal.
+    Core Innovation:
+    ---------------
+    Traditional NLP Transformers:
+        Input: [Token_1, Token_2, ..., Token_N] (words/subwords)
+        Position: Learned position embeddings for word order
+        Attention: Captures semantic relationships between words
+
+    SST (This Model):
+        Input: [Sensor_1, Sensor_2, ..., Sensor_N] (physical sensors)
+        Position: Learned position embeddings for sensor locations
+        Attention: Captures spatial relationships between sensors
+
+    Key Differences from NLP:
+    -------------------------
+    1. Fixed Sequence Length: N sensors is predetermined by physical system
+    2. Spatial Semantics: Position embeddings encode sensor locations, not temporal order
+    3. Cross-Sensor Dependencies: Attention learns physical causality (e.g., temperature
+       sensor affects pressure sensor in industrial processes)
+    4. Domain-Specific: Designed for industrial sensor arrays, not language
+
+    Architecture Details:
+    ---------------------
+    - Sensor Embedding: Projects each scalar sensor reading to d_model dimensions
+    - Positional Encoding: Learnable parameters encoding sensor spatial positions
+    - Multi-Head Attention: Captures complex inter-sensor relationships
+    - Global Pooling: Aggregates sensor sequence information
+    - Output Projection: Maps to target sensor predictions
+
+    This design enables Transformers to excel at industrial digital twin tasks by
+    treating sensor arrays as "sentences" where each sensor is a "word" with spatial
+    rather than temporal semantics.
 
     Args:
-        num_boundary_sensors (int): Number of boundary condition sensors (input features)
+        num_boundary_sensors (int): Number of boundary condition sensors (input sequence length)
         num_target_sensors (int): Number of target sensors to predict (output features)
-        d_model (int): Dimension of the transformer model. Default: 128
+        d_model (int): Transformer model dimension. Default: 128
         nhead (int): Number of attention heads. Default: 8
         num_layers (int): Number of transformer encoder layers. Default: 3
-        dropout (float): Dropout rate. Default: 0.1
+        dropout (float): Dropout rate for regularization. Default: 0.1
 
     Example:
         >>> model = StaticSensorTransformer(
-        ...     num_boundary_sensors=10,
-        ...     num_target_sensors=5,
+        ...     num_boundary_sensors=10,  # 10 sensors in input sequence
+        ...     num_target_sensors=5,     # Predict 5 target sensors
         ...     d_model=128,
         ...     nhead=8
         ... )
-        >>> x = torch.randn(32, 10)  # batch_size=32, sensors=10
-        >>> predictions = model(x)   # output: (32, 5)
+        >>> x = torch.randn(32, 10)      # Batch of 32 samples, 10 sensor readings
+        >>> predictions = model(x)       # Output: (32, 5) target predictions
     """
 
     def __init__(self, num_boundary_sensors, num_target_sensors,

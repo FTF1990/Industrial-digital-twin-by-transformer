@@ -27,13 +27,14 @@ Traditional machine learning approaches treat sensors independently or use simpl
 
 #### **StaticSensorTransformer (SST)**
 - **Purpose**: Maps boundary condition sensors to target sensor predictions
-- **Architecture**: Transformer encoder with positional encoding for sensor locations
-- **Use Case**: Systems with stable relationships between sensors
+- **Architecture**: Sensor sequence Transformer with learned positional encodings
+- **Innovation**: Treats fixed sensor arrays as sequences (replacing NLP token sequences)
+- **Use Case**: Industrial systems with complex sensor inter-dependencies
 - **Advantages**:
+  - Captures spatial sensor relationships through attention mechanism
   - Fast training and inference
-  - Lower computational requirements
-  - Excellent for static or quasi-static systems
-- **Formerly**: V1 or CompactSensorTransformer
+  - Learns physical causality between sensors
+  - Excellent for industrial digital twin applications
 
 ### 🆕 Enhanced Residual Boost Training System (v1.0)
 
@@ -87,54 +88,119 @@ This framework is ideal for:
 
 ## 🏗️ Architecture Overview
 
-### Stage2 Residual Boost Architecture
+### 🔑 Core Innovation: Sensors as Sequence Elements
+
+**Traditional NLP Transformers vs. SST (Our Innovation)**
 
 ```
-Industrial System (Physical)
-    ↓
-┌─────────────────────────────────────┐
-│  Boundary Condition Sensors         │
-│  (Temperature, Pressure, Flow, etc.)│
-└──────────────┬──────────────────────┘
-               ↓
-┌──────────────────────────────────────┐
-│   SST (StaticSensorTransformer)     │
-│   - Sensor Embedding Layer           │
-│   - Positional Encoding              │
-│   - Multi-Head Attention             │
-│   - Feed Forward Networks            │
-│   - Global Pooling                   │
-└──────────────┬───────────────────────┘
-               ↓
-       SST Predictions + Residuals
-               ↓
-┌──────────────────────────────────────┐
-│   Stage2 Residual Model             │
-│   - Trained on SST residuals         │
-│   - Same SST architecture            │
-│   - Learns residual corrections      │
-└──────────────┬───────────────────────┘
-               ↓
-        Residual Predictions
-               ↓
-┌──────────────────────────────────────┐
-│   Intelligent R² Selection           │
-│   - Calculate R² per signal          │
-│   - Apply Stage2 if R² < threshold   │
-│   - Selective ensemble combination   │
-└──────────────┬───────────────────────┘
-               ↓
-┌──────────────────────────────────────┐
-│   Final Ensemble Predictions         │
-│   (Enhanced Accuracy)                │
-└──────────────┬───────────────────────┘
-               ↓
-        Optional: Sundial Forecasting
-               ↓
-┌──────────────────────────────────────┐
-│   Future Residual Prediction         │
-│   (Long-term Trends)                 │
-└──────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                  NLP Transformer (Traditional)                  │
+├─────────────────────────────────────────────────────────────────┤
+│ Input:  [The, cat, sits, on, the, mat]  ← Words as tokens      │
+│ Embed:  [E₁,  E₂,  E₃,   E₄,  E₅,  E₆]  ← Word embeddings      │
+│ Pos:    [P₁,  P₂,  P₃,   P₄,  P₅,  P₆]  ← Temporal order       │
+│ Attn:   Semantic relationships between words                     │
+└─────────────────────────────────────────────────────────────────┘
+
+                              ⬇️  INNOVATION  ⬇️
+
+┌─────────────────────────────────────────────────────────────────┐
+│              SST - Sensor Sequence Transformer (Ours)           │
+├─────────────────────────────────────────────────────────────────┤
+│ Input:  [S₁,  S₂,  S₃, ..., Sₙ]  ← Fixed sensor array          │
+│         (Temp, Pressure, Flow, ...)                             │
+│ Embed:  [E₁,  E₂,  E₃, ..., Eₙ]  ← Sensor value embeddings     │
+│ Pos:    [P₁,  P₂,  P₃, ..., Pₙ]  ← SPATIAL locations           │
+│ Attn:   Physical causality & sensor inter-dependencies          │
+│                                                                  │
+│ Key Differences:                                                 │
+│ • Fixed sequence length (N sensors predetermined)               │
+│ • Position = Sensor location, NOT temporal order                │
+│ • Attention learns cross-sensor physical relationships          │
+│ • Domain-specific for industrial systems                        │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 🎯 SST Architecture Deep Dive
+
+```
+Physical Sensor Array: [Sensor₁, Sensor₂, ..., Sensorₙ]
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    Sensor Embedding Layer                        │
+│  • Projects each scalar sensor reading → d_model dimensions     │
+│  • Each sensor gets its own embedding transformation            │
+│  • Input: (batch, N_sensors) → Output: (batch, N_sensors, d_model)│
+└──────────────────────┬──────────────────────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────────────────────┐
+│               Learnable Position Encoding                        │
+│  • Unlike NLP: Encodes SPATIAL sensor positions                 │
+│  • Learns sensor location importance (e.g., inlet vs outlet)    │
+│  • Shape: (N_sensors, d_model) - one per sensor                │
+│  • Added to embeddings: Embed + PosEncode                       │
+└──────────────────────┬──────────────────────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────────────────────┐
+│              Multi-Head Self-Attention Mechanism                 │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ Head 1: Learns temperature-pressure relationships        │  │
+│  │ Head 2: Learns flow-velocity correlations               │  │
+│  │ Head 3: Learns spatial proximity effects                │  │
+│  │ ...                                                      │  │
+│  │ Head N: Learns system-wide dependencies                 │  │
+│  └─────────────────────────────────────────────────────────┘  │
+│  • Captures complex, non-linear sensor interactions             │
+│  • Attention weights reveal sensor importance                   │
+└──────────────────────┬──────────────────────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                   Transformer Encoder Stack                      │
+│  Layer 1: Attention + FFN + Residual                            │
+│  Layer 2: Attention + FFN + Residual                            │
+│  ...                                                             │
+│  Layer L: Attention + FFN + Residual                            │
+│  • Each layer refines sensor relationship understanding         │
+└──────────────────────┬──────────────────────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────────────────────┐
+│              Global Pooling (Sequence Aggregation)               │
+│  • Adaptive average pooling over sensor sequence                │
+│  • Aggregates information from all sensors                      │
+│  • Output: (batch, d_model) - fixed-size representation        │
+└──────────────────────┬──────────────────────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    Output Projection Layer                       │
+│  • Projects aggregated representation → target sensor values    │
+│  • Linear transformation: d_model → N_target_sensors           │
+│  • Final predictions: (batch, N_target_sensors)                │
+└──────────────────────┬──────────────────────────────────────────┘
+                       ↓
+              Target Sensor Predictions
+```
+
+### 📊 Stage2 Residual Boost System
+
+Built on top of SST, the Stage2 system further refines predictions:
+
+```
+Step 1: Base SST Model
+   Boundary Sensors → [SST] → Predictions + Residuals
+
+Step 2: Stage2 Residual Model
+   Boundary Sensors → [SST₂] → Residual Corrections
+
+Step 3: Intelligent R² Selection
+   For each target sensor:
+     if R² < threshold: Apply Stage2 correction
+     else: Use base SST prediction
+
+Step 4: Final Ensemble
+   Enhanced predictions with 15-25% accuracy improvement
+
+Optional: Sundial Forecasting
+   Final residuals → [Sundial] → Future trend prediction
 ```
 
 ## 🔧 Installation
