@@ -9,7 +9,7 @@ from scipy.ndimage import maximum_filter1d
 
 def create_temporal_context_data(X, y, context_window=5):
     """
-    创建时序上下文数据
+    Create temporal context data
 
     Creates temporal context windows for time-series sensor data. Each sample
     is expanded to include surrounding timesteps for temporal analysis.
@@ -33,7 +33,7 @@ def create_temporal_context_data(X, y, context_window=5):
     valid_samples = valid_end - valid_start
 
     if valid_samples <= 0:
-        raise ValueError(f"数据量不足，需要至少 {2*context_window+1} 个样本")
+        raise ValueError(f"Insufficient data, need at least {2*context_window+1} samples")
 
     X_context = np.zeros((valid_samples, context_size, n_features))
     y_context = np.zeros((valid_samples, y.shape[1]))
@@ -54,7 +54,7 @@ def create_temporal_context_data(X, y, context_window=5):
 def apply_ifd_smoothing(y_data, target_sensors, ifd_sensor_names,
                         window_length=15, polyorder=3):
     """
-    对指定IFD传感器应用平滑滤波
+    Apply smoothing filter to specified IFD sensors
 
     Applies Savitzky-Golay smoothing filter to specified sensors to reduce noise
     while preserving peak features. Particularly useful for IFD (Industrial Fault Detection)
@@ -100,7 +100,7 @@ def apply_ifd_smoothing(y_data, target_sensors, ifd_sensor_names,
 
 def handle_duplicate_columns(df):
     """
-    处理DataFrame中的重复列名，为重复列添加编号后缀
+    Handle duplicate column names in DataFrame by adding numbered suffixes
 
     Handles duplicate column names in a DataFrame by appending numeric suffixes
     to duplicated columns while preserving the original column order.
@@ -134,7 +134,7 @@ def handle_duplicate_columns(df):
 
 def get_available_signals(df):
     """
-    获取所有可用信号
+    Get all available signals
 
     Extracts available sensor signal names from a DataFrame, excluding timestamp columns.
 
@@ -160,7 +160,7 @@ def get_available_signals(df):
 
 def validate_signal_exclusivity_v1(boundary_signals, target_signals):
     """
-    验证V1信号选择的互斥性
+    Validate signal exclusivity for V1 model
 
     Validates that boundary and target signals don't overlap for V1 model.
 
@@ -182,15 +182,15 @@ def validate_signal_exclusivity_v1(boundary_signals, target_signals):
 
     if overlap:
         overlap_list = list(overlap)
-        error_msg = f"❌ 信号互斥错误！\n\n以下信号同时出现在边界条件和目标信号中：\n"
+        error_msg = f"❌ Signal exclusivity error!\n\nThe following signals appear in both boundary and target:\n"
 
         for i, sig in enumerate(overlap_list[:10], 1):
             error_msg += f"  {i}. {sig}\n"
 
         if len(overlap_list) > 10:
-            error_msg += f"  ... 还有 {len(overlap_list)-10} 个重复信号\n"
+            error_msg += f"  ... and {len(overlap_list)-10} more duplicate signals\n"
 
-        error_msg += f"\n请删除其中一个位置的这些信号！"
+        error_msg += f"\nPlease remove these signals from one of the positions!"
         return False, error_msg
 
     return True, ""
@@ -198,7 +198,7 @@ def validate_signal_exclusivity_v1(boundary_signals, target_signals):
 
 def validate_signal_exclusivity_v4(boundary_signals, target_signals, temporal_signals):
     """
-    验证V4信号选择的互斥性
+    Validate signal exclusivity for V4 model
 
     Validates signal selections for V4 model:
     1. Boundary and target signals must not overlap
@@ -226,11 +226,11 @@ def validate_signal_exclusivity_v4(boundary_signals, target_signals, temporal_si
 
     if overlap_bt:
         overlap_list = list(overlap_bt)
-        error_msg = f"边界条件和目标信号重复 ({len(overlap_list)}个)：\n"
+        error_msg = f"Boundary and target signals overlap ({len(overlap_list)} signals):\n"
         for i, sig in enumerate(overlap_list[:5], 1):
             error_msg += f"  {i}. {sig}\n"
         if len(overlap_list) > 5:
-            error_msg += f"  ... 还有 {len(overlap_list)-5} 个\n"
+            error_msg += f"  ... and {len(overlap_list)-5} more\n"
         errors.append(error_msg)
 
     # Check temporal signals are subset of target signals
@@ -240,15 +240,15 @@ def validate_signal_exclusivity_v4(boundary_signals, target_signals, temporal_si
 
         if invalid_temporal:
             invalid_list = list(invalid_temporal)
-            error_msg = f"时序信号必须在目标信号中 ({len(invalid_list)}个不符合)：\n"
+            error_msg = f"Temporal signals must be in target signals ({len(invalid_list)} invalid):\n"
             for i, sig in enumerate(invalid_list[:5], 1):
                 error_msg += f"  {i}. {sig}\n"
             if len(invalid_list) > 5:
-                error_msg += f"  ... 还有 {len(invalid_list)-5} 个\n"
+                error_msg += f"  ... and {len(invalid_list)-5} more\n"
             errors.append(error_msg)
 
     if errors:
-        full_error = "❌ 信号选择错误！\n\n" + "\n".join(errors) + "\n请修正后再训练！"
+        full_error = "❌ Signal selection error!\n\n" + "\n".join(errors) + "\n Please fix before training!"
         return False, full_error
 
     return True, ""
