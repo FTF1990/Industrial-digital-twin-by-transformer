@@ -20,7 +20,7 @@ class StaticSensorTransformer(nn.Module):
     """
     StaticSensorTransformer (SST): Sensor Sequence Transformer
 
-    革新性架构 - 将固定传感器序列替代传统Transformer的语料序列
+    Innovative architecture - replaces traditional Transformer token sequences with fixed sensor sequences
 
     Core Innovation:
     ---------------
@@ -81,11 +81,11 @@ class StaticSensorTransformer(nn.Module):
         self.num_target_sensors = num_target_sensors
         self.d_model = d_model
 
-        # 边界条件嵌入
+        # Boundary condition embedding
         self.boundary_embedding = nn.Linear(1, d_model)
         self.boundary_position_encoding = nn.Parameter(torch.randn(num_boundary_sensors, d_model))
 
-        # Transformer编码器
+        # Transformer encoder
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=nhead,
@@ -95,7 +95,7 @@ class StaticSensorTransformer(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
 
-        # 输出层
+        # Output layer
         self.output_projection = nn.Linear(d_model, num_target_sensors)
         self.global_pool = nn.AdaptiveAvgPool1d(1)
 

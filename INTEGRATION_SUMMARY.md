@@ -80,11 +80,14 @@ Moved to `archive/` directory:
 ### Import Strategy
 The new application uses a multi-level import strategy:
 1. Try: `from models.static_transformer import StaticSensorTransformer`
-2. Fallback: `from static_transformer import StaticSensorTransformer`
-3. Final fallback: Inline definitions (if needed)
+2. Try: `from models.residual_tft import GroupedMultiTargetTFT, ResidualExtractor`
+3. Fallback: `from static_transformer import StaticSensorTransformer`
+4. Final fallback: Direct imports without package prefix
 
 ### Model Compatibility
 - ✅ SST models from old versions: Fully compatible
+- ✅ Stage2 Boost models: Now fully implemented
+- ✅ Residual extraction: Fully functional
 - ❌ HST models: No longer supported (archived)
 - ✅ Training configs: Fully compatible
 
@@ -97,6 +100,7 @@ All required dependencies are in `requirements.txt`:
 - scikit-learn >= 1.3.0
 - matplotlib >= 3.7.0
 - seaborn >= 0.12.0
+- scipy >= 1.10.0 (for signal processing)
 
 ## 🚀 Quick Start
 
@@ -126,8 +130,9 @@ Based on transformer_boost.ipynb experience:
 ### Code Consistency
 - ✅ All imports properly configured with fallbacks
 - ✅ StaticSensorTransformer available from models/
+- ✅ ResidualExtractor and GroupedMultiTargetTFT implemented in models/residual_tft.py
 - ✅ Directory structure matches expectations
-- ⚠️ residual_tft.py not required (inline definitions available)
+- ✅ All required modules are now present and functional
 
 ### Known Limitations
 1. **Sundial feature**: Framework only, full implementation in v2.0
