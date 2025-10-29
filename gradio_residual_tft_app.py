@@ -13,6 +13,7 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.cuda.amp import autocast, GradScaler
 from typing import Dict, List, Tuple, Any, Optional
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 import sys
@@ -283,7 +284,14 @@ try:
         GroupedMultiTargetTFT,
         ResidualExtractor,
         train_residual_tft,
-        prepare_residual_sequence_data
+        prepare_residual_sequence_data,
+        compute_r2_safe,
+        compute_residuals_correctly,
+        batch_inference,
+        inference_with_boosting,
+        compute_per_signal_metrics,
+        clear_gpu_memory,
+        print_gpu_memory
     )
     from models.utils import apply_ifd_smoothing
 
@@ -298,7 +306,14 @@ except ImportError as e:
             GroupedMultiTargetTFT,
             ResidualExtractor,
             train_residual_tft,
-            prepare_residual_sequence_data
+            prepare_residual_sequence_data,
+            compute_r2_safe,
+            compute_residuals_correctly,
+            batch_inference,
+            inference_with_boosting,
+            compute_per_signal_metrics,
+            clear_gpu_memory,
+            print_gpu_memory
         )
         from utils import apply_ifd_smoothing
 
@@ -669,8 +684,11 @@ def train_stage2_boost_model(
 
         criterion = nn.MSELoss()
 
+        # Mixed precision training
+        scaler = GradScaler()
+
         # Training loop
-        log_msg.append(f"\n🎯 开始训练 (总轮数: {config['epochs']})")
+        log_msg.append(f"\n🎯 开始训练 (混合精度, 总轮数: {config['epochs']})")
 
         history = {
             'train_losses': [],
@@ -684,7 +702,7 @@ def train_stage2_boost_model(
         early_stop_patience = config.get('early_stop_patience', 25)
 
         for epoch in range(config['epochs']):
-            # Training phase
+            # Training phase with mixed precision
             stage2_model.train()
             train_loss = 0.0
             train_preds = []
@@ -694,15 +712,22 @@ def train_stage2_boost_model(
                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
 
                 optimizer.zero_grad()
-                outputs = stage2_model(batch_X)
-                loss = criterion(outputs, batch_y)
-                loss.backward()
+
+                # Mixed precision forward pass
+                with autocast():
+                    outputs = stage2_model(batch_X)
+                    loss = criterion(outputs, batch_y)
+
+                # Mixed precision backward pass
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
 
                 # Gradient clipping
                 if config.get('grad_clip', 0) > 0:
                     torch.nn.utils.clip_grad_norm_(stage2_model.parameters(), config['grad_clip'])
 
-                optimizer.step()
+                scaler.step(optimizer)
+                scaler.update()
 
                 train_loss += loss.item()
                 train_preds.append(outputs.detach().cpu().numpy())
@@ -711,9 +736,9 @@ def train_stage2_boost_model(
             train_loss /= len(train_loader)
             train_preds = np.vstack(train_preds)
             train_targets = np.vstack(train_targets)
-            train_r2 = r2_score(train_targets, train_preds)
+            train_r2, _ = compute_r2_safe(train_targets, train_preds, method='per_output_mean')
 
-            # Validation phase
+            # Validation phase with mixed precision
             stage2_model.eval()
             val_loss = 0.0
             val_preds = []
@@ -722,8 +747,9 @@ def train_stage2_boost_model(
             with torch.no_grad():
                 for batch_X, batch_y in val_loader:
                     batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-                    outputs = stage2_model(batch_X)
-                    loss = criterion(outputs, batch_y)
+                    with autocast():
+                        outputs = stage2_model(batch_X)
+                        loss = criterion(outputs, batch_y)
 
                     val_loss += loss.item()
                     val_preds.append(outputs.cpu().numpy())
@@ -732,7 +758,7 @@ def train_stage2_boost_model(
             val_loss /= len(val_loader)
             val_preds = np.vstack(val_preds)
             val_targets = np.vstack(val_targets)
-            val_r2 = r2_score(val_targets, val_preds)
+            val_r2, _ = compute_r2_safe(val_targets, val_preds, method='per_output_mean')
 
             # Record history
             history['train_losses'].append(train_loss)
@@ -771,17 +797,15 @@ def train_stage2_boost_model(
         # Load best model
         stage2_model.load_state_dict(best_model_state)
 
-        # Test set evaluation
-        stage2_model.eval()
-        with torch.no_grad():
-            X_test_tensor = torch.FloatTensor(X_test_scaled).to(device)
-            y_test_pred_scaled = stage2_model(X_test_tensor).cpu().numpy()
-
-        y_test_pred = scaler_y.inverse_transform(y_test_pred_scaled)
+        # Test set evaluation with batch inference
+        y_test_pred = batch_inference(
+            stage2_model, X_test, scaler_X, scaler_y, device,
+            batch_size=config['batch_size'], model_name="Stage2"
+        )
 
         test_mae = mean_absolute_error(y_test, y_test_pred)
         test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-        test_r2 = r2_score(y_test, y_test_pred)
+        test_r2, _ = compute_r2_safe(y_test, y_test_pred, method='per_output_mean')
 
         log_msg.append(f"\n📊 测试集性能:")
         log_msg.append(f"  MAE: {test_mae:.6f}")
@@ -919,23 +943,24 @@ def compute_signal_r2_and_select_threshold(
         y_true = residuals_df[y_true_cols].values
         y_pred_base = residuals_df[y_pred_cols].values
 
-        # Stage2 residual prediction
+        # Stage2 residual prediction using batch inference
         X = residuals_df[boundary_signals].values
-        X_scaled = global_state['stage2_scalers'][stage2_model_name]['X'].transform(X)
-
-        stage2_model.eval()
-        with torch.no_grad():
-            X_tensor = torch.FloatTensor(X_scaled).to(device)
-            y_residual_pred_scaled = stage2_model(X_tensor).cpu().numpy()
-
-        y_residual_pred = global_state['stage2_scalers'][stage2_model_name]['y'].inverse_transform(
-            y_residual_pred_scaled
+        y_residual_pred = batch_inference(
+            stage2_model,
+            X,
+            global_state['stage2_scalers'][stage2_model_name]['X'],
+            global_state['stage2_scalers'][stage2_model_name]['y'],
+            device,
+            batch_size=512,
+            model_name="Stage2"
         )
 
-        # Compute R² for each signal
+        # Compute R² for each signal using safe computation
         signal_r2_scores = []
+        _, per_signal_r2 = compute_r2_safe(y_true, y_pred_base, method='per_output_mean')
+
         for i, signal in enumerate(target_signals):
-            r2 = r2_score(y_true[:, i], y_pred_base[:, i])
+            r2 = per_signal_r2[i]
             signal_r2_scores.append({
                 'signal': signal,
                 'r2': r2,
@@ -964,13 +989,13 @@ def compute_signal_r2_and_select_threshold(
                 # Apply Stage2 correction
                 y_ensemble[:, i] = y_pred_base[:, i] + y_residual_pred[:, i]
 
-        # Compute ensemble model performance
+        # Compute ensemble model performance using safe R² computation
         mae_base = mean_absolute_error(y_true, y_pred_base)
         mae_ensemble = mean_absolute_error(y_true, y_ensemble)
         rmse_base = np.sqrt(mean_squared_error(y_true, y_pred_base))
         rmse_ensemble = np.sqrt(mean_squared_error(y_true, y_ensemble))
-        r2_base = r2_score(y_true, y_pred_base)
-        r2_ensemble = r2_score(y_true, y_ensemble)
+        r2_base, _ = compute_r2_safe(y_true, y_pred_base, method='per_output_mean')
+        r2_ensemble, _ = compute_r2_safe(y_true, y_ensemble, method='per_output_mean')
 
         improvement_mae = (mae_base - mae_ensemble) / mae_base * 100
         improvement_rmse = (rmse_base - rmse_ensemble) / rmse_base * 100
@@ -1246,36 +1271,50 @@ def train_base_model_ui(
         )
         criterion = nn.MSELoss()
 
+        # Mixed precision training
+        scaler = GradScaler()
+        grad_clip_norm = 1.0
+
         # Training loop
-        log_messages.append(f"\n🎯 开始训练...")
+        log_messages.append(f"\n🎯 开始训练 (混合精度)...")
         history = {'train_losses': [], 'val_losses': []}
         best_val_loss = float('inf')
         patience_counter = 0
         early_stop_patience = 25
 
         for epoch in range(epochs):
-            # Training
+            # Training with mixed precision
             model.train()
             train_loss = 0.0
             for batch_X, batch_y in train_loader:
                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
                 optimizer.zero_grad()
-                outputs = model(batch_X)
-                loss = criterion(outputs, batch_y)
-                loss.backward()
-                optimizer.step()
+
+                # Mixed precision forward pass
+                with autocast():
+                    outputs = model(batch_X)
+                    loss = criterion(outputs, batch_y)
+
+                # Mixed precision backward pass
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+                scaler.step(optimizer)
+                scaler.update()
+
                 train_loss += loss.item()
 
             train_loss /= len(train_loader)
 
-            # Validation
+            # Validation with mixed precision
             model.eval()
             val_loss = 0.0
             with torch.no_grad():
                 for batch_X, batch_y in val_loader:
                     batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-                    outputs = model(batch_X)
-                    loss = criterion(outputs, batch_y)
+                    with autocast():
+                        outputs = model(batch_X)
+                        loss = criterion(outputs, batch_y)
                     val_loss += loss.item()
 
             val_loss /= len(val_loader)
@@ -1306,17 +1345,15 @@ def train_base_model_ui(
         # Load best model
         model.load_state_dict(best_model_state)
 
-        # Test set evaluation
-        model.eval()
-        with torch.no_grad():
-            X_test_tensor = torch.FloatTensor(X_test_scaled).to(device)
-            y_test_pred_scaled = model(X_test_tensor).cpu().numpy()
-
-        y_test_pred = scaler_y.inverse_transform(y_test_pred_scaled)
+        # Test set evaluation with mixed precision and batch inference
+        y_test_pred = batch_inference(
+            model, X_test, scaler_X, scaler_y, device,
+            batch_size=batch_size, model_name=model_type
+        )
 
         test_mae = mean_absolute_error(y_test, y_test_pred)
         test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-        test_r2 = r2_score(y_test, y_test_pred)
+        test_r2, _ = compute_r2_safe(y_test, y_test_pred, method='per_output_mean')
 
         log_messages.append(f"\n📊 测试集性能:")
         log_messages.append(f"  MAE: {test_mae:.6f}")
@@ -1899,13 +1936,13 @@ def create_unified_interface():
                         y_pred_base_seg = y_pred_base[start_idx:end_idx]
                         y_pred_ensemble_seg = y_pred_ensemble[start_idx:end_idx]
 
-                        # 计算性能
+                        # 计算性能 using safe R² computation
                         mae_base = mean_absolute_error(y_true_seg, y_pred_base_seg)
                         mae_ensemble = mean_absolute_error(y_true_seg, y_pred_ensemble_seg)
                         rmse_base = np.sqrt(mean_squared_error(y_true_seg, y_pred_base_seg))
                         rmse_ensemble = np.sqrt(mean_squared_error(y_true_seg, y_pred_ensemble_seg))
-                        r2_base = r2_score(y_true_seg, y_pred_base_seg)
-                        r2_ensemble = r2_score(y_true_seg, y_pred_ensemble_seg)
+                        r2_base, _ = compute_r2_safe(y_true_seg, y_pred_base_seg, method='per_output_mean')
+                        r2_ensemble, _ = compute_r2_safe(y_true_seg, y_pred_ensemble_seg, method='per_output_mean')
 
                         improvement_mae = (mae_base - mae_ensemble) / mae_base * 100
                         improvement_rmse = (rmse_base - rmse_ensemble) / rmse_base * 100

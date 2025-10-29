@@ -134,6 +134,7 @@ class StaticSensorTransformer(nn.Module):
         return predictions
 
 
-# Alias for backward compatibility and convenience
+# Aliases for backward compatibility and convenience
 SST = StaticSensorTransformer
+CompactSensorTransformer = StaticSensorTransformer  # Alias used in notebook implementations
 

@@ -8,14 +8,19 @@ Key Components:
 - ResidualExtractor: Extract residuals from trained SST models
 - GroupedMultiTargetTFT: TFT-style model for residual prediction
 - Utility functions for residual data preparation
+- Mixed precision inference utilities
+- Safe R² computation for multi-output scenarios
+- Selective boosting based on R² thresholds
 """
 
 import torch
 import torch.nn as nn
 import numpy as np
 import pandas as pd
+import gc
 from typing import Dict, List, Tuple, Any, Optional
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from torch.cuda.amp import autocast
 
 
 class GroupedMultiTargetTFT(nn.Module):
@@ -168,20 +173,25 @@ class ResidualExtractor:
             X = df[boundary_signals].values
             y_true = df[target_signals].values
 
-            # Scale inputs
-            X_scaled = scaler_X.transform(X)
+            # Use improved residual computation with batch processing and mixed precision
+            residuals = compute_residuals_correctly(
+                X, y_true, model, scaler_X, scaler_y, device, batch_size=1024
+            )
 
-            # Generate predictions
+            # Also get predictions for visualization
+            X_scaled = scaler_X.transform(X)
             model.eval()
             with torch.no_grad():
                 X_tensor = torch.FloatTensor(X_scaled).to(device)
-                y_pred_scaled = model(X_tensor).cpu().numpy()
-
-            # Inverse transform predictions
+                y_pred_list = []
+                batch_size = 1024
+                for i in range(0, len(X_tensor), batch_size):
+                    batch = X_tensor[i:i+batch_size]
+                    with autocast():
+                        y_pred_batch = model(batch).cpu().numpy()
+                    y_pred_list.append(y_pred_batch)
+                y_pred_scaled = np.vstack(y_pred_list)
             y_pred = scaler_y.inverse_transform(y_pred_scaled)
-
-            # Calculate residuals
-            residuals = y_true - y_pred
 
             # Create output dataframe
             residuals_df = pd.DataFrame()
@@ -400,3 +410,350 @@ def train_residual_tft(
         model.load_state_dict(best_model_state)
 
     return model, history
+
+
+def compute_r2_safe(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    method: str = 'per_output_mean'
+) -> Tuple[float, np.ndarray]:
+    """
+    Safe R² calculation - avoid anomalies with multi-output
+
+    This function computes R² scores per output signal and aggregates them
+    to avoid anomalies that can occur with sklearn's default multi-output R² calculation.
+
+    Args:
+        y_true: Ground truth (n_samples, n_outputs) or (n_samples,)
+        y_pred: Predictions (n_samples, n_outputs) or (n_samples,)
+        method: Aggregation method
+            - 'per_output_mean': Mean of per-output R² (filters out anomalies)
+            - 'per_output_median': Median of per-output R²
+            - 'sklearn_default': Use sklearn's default multioutput='uniform_average'
+            - 'global': Treat all values as one global prediction
+
+    Returns:
+        r2: Overall R² score
+        per_output_r2: R² for each output (for diagnostics)
+    """
+    if y_true.ndim == 1:
+        y_true = y_true.reshape(-1, 1)
+        y_pred = y_pred.reshape(-1, 1)
+
+    n_outputs = y_true.shape[1]
+    per_output_r2 = np.zeros(n_outputs)
+
+    # Compute R² for each output separately
+    for i in range(n_outputs):
+        y_t = y_true[:, i]
+        y_p = y_pred[:, i]
+
+        # Check variance
+        var_true = np.var(y_t)
+        if var_true < 1e-10:
+            per_output_r2[i] = 0.0
+        else:
+            try:
+                per_output_r2[i] = r2_score(y_t, y_p)
+            except Exception:
+                per_output_r2[i] = -1.0
+
+    # Aggregate based on method
+    if method == 'per_output_mean':
+        # Filter out anomalies
+        valid_r2 = per_output_r2[np.isfinite(per_output_r2) & (per_output_r2 > -10)]
+        r2 = np.mean(valid_r2) if len(valid_r2) > 0 else -1.0
+    elif method == 'per_output_median':
+        valid_r2 = per_output_r2[np.isfinite(per_output_r2) & (per_output_r2 > -10)]
+        r2 = np.median(valid_r2) if len(valid_r2) > 0 else -1.0
+    elif method == 'sklearn_default':
+        r2 = r2_score(y_true, y_pred, multioutput='uniform_average')
+    elif method == 'global':
+        # Flatten and treat as single output
+        r2 = r2_score(y_true.flatten(), y_pred.flatten())
+    else:
+        r2 = r2_score(y_true, y_pred)
+
+    return r2, per_output_r2
+
+
+def compute_residuals_correctly(
+    X_orig: np.ndarray,
+    y_orig: np.ndarray,
+    base_model: nn.Module,
+    scaler_X: Any,
+    scaler_y: Any,
+    device: torch.device,
+    batch_size: int = 1024
+) -> np.ndarray:
+    """
+    Correctly compute residuals in original scale.
+
+    CRITICAL: Residuals must be computed in the original (non-standardized) space.
+    This ensures that Stage2 model learns meaningful residual patterns.
+
+    Steps:
+    1. Standardize input using scaler_X
+    2. Predict in standardized space
+    3. Inverse transform predictions to original space
+    4. Compute residuals = y_true - y_pred (both in original space)
+
+    Args:
+        X_orig: Original input data (n_samples, n_features)
+        y_orig: Original target data (n_samples, n_targets)
+        base_model: Trained Stage1 model
+        scaler_X: Input scaler (from Stage1 training)
+        scaler_y: Output scaler (from Stage1 training)
+        device: torch.device for inference
+        batch_size: Batch size for memory-efficient inference
+
+    Returns:
+        residuals: Residuals in original space (n_samples, n_targets)
+    """
+    base_model.eval()
+
+    # Step 1: Standardize input
+    X_scaled = scaler_X.transform(X_orig)
+
+    # Step 2: Predict in standardized space (with batching for memory efficiency)
+    with torch.no_grad():
+        X_tensor = torch.FloatTensor(X_scaled).to(device)
+        y_pred_scaled_list = []
+
+        for i in range(0, len(X_tensor), batch_size):
+            batch = X_tensor[i:i+batch_size]
+            with autocast():
+                y_pred_batch = base_model(batch).cpu().numpy()
+            y_pred_scaled_list.append(y_pred_batch)
+
+        y_pred_scaled = np.vstack(y_pred_scaled_list)
+
+    # Step 3: Inverse transform to original space
+    y_pred_original = scaler_y.inverse_transform(y_pred_scaled)
+
+    # Step 4: Compute residuals in original space
+    residuals = y_orig - y_pred_original
+
+    return residuals
+
+
+def batch_inference(
+    model: nn.Module,
+    X_data: np.ndarray,
+    scaler_X: Any,
+    scaler_y: Any,
+    device: torch.device,
+    batch_size: int = 512,
+    model_name: str = "Model"
+) -> np.ndarray:
+    """
+    Batch processing inference to avoid GPU OOM
+
+    This function performs inference in batches with automatic memory management
+    to handle large datasets without running out of GPU memory.
+
+    Args:
+        model: Trained model
+        X_data: Input data in original space (n_samples, n_features)
+        scaler_X: Input scaler
+        scaler_y: Output scaler
+        device: torch.device for inference
+        batch_size: Batch size for processing
+        model_name: Name for logging
+
+    Returns:
+        y_pred: Predictions in original space (n_samples, n_targets)
+    """
+    model.eval()
+    n_samples = X_data.shape[0]
+    predictions_list = []
+
+    for i in range(0, n_samples, batch_size):
+        end_idx = min(i + batch_size, n_samples)
+        batch_X = X_data[i:end_idx]
+
+        # Standardize
+        batch_X_scaled = scaler_X.transform(batch_X)
+        batch_X_tensor = torch.FloatTensor(batch_X_scaled).to(device)
+
+        # Inference with mixed precision
+        with torch.no_grad():
+            with autocast():
+                batch_pred_scaled = model(batch_X_tensor).cpu().numpy()
+
+        # Inverse transform
+        batch_pred = scaler_y.inverse_transform(batch_pred_scaled)
+        predictions_list.append(batch_pred)
+
+        # Clean up GPU memory
+        del batch_X_tensor, batch_pred_scaled
+        if (i // batch_size + 1) % 10 == 0:
+            torch.cuda.empty_cache()
+            gc.collect()
+
+    y_pred = np.vstack(predictions_list)
+    return y_pred
+
+
+def inference_with_boosting(
+    X_test: np.ndarray,
+    base_model: nn.Module,
+    residual_model: nn.Module,
+    scalers: Dict[str, Any],
+    device: torch.device,
+    signal_r2_scores: Optional[np.ndarray] = None,
+    r2_threshold: float = 0.4,
+    batch_size: int = 512,
+    use_selective_boosting: bool = True
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Apply boosting selectively based on R² scores
+
+    This function implements intelligent model selection:
+    - For signals with high R² (≥ threshold): Use Stage1 predictions only
+    - For signals with low R² (< threshold): Apply Stage2 boost correction
+
+    Args:
+        X_test: Test data in original space
+        base_model: Stage 1 model
+        residual_model: Stage 2 residual model
+        scalers: Dictionary containing:
+            - 'stage1_scaler_X': Stage1 input scaler
+            - 'stage1_scaler_y': Stage1 output scaler
+            - 'stage2_scaler_X': Stage2 input scaler
+            - 'stage2_scaler_residual': Stage2 residual scaler
+        device: torch.device
+        signal_r2_scores: R² score for each signal from validation (optional)
+        r2_threshold: Threshold for determining weak signals
+        batch_size: Batch size for inference
+        use_selective_boosting: If True, only boost weak signals; if False, boost all
+
+    Returns:
+        y_pred_stage1: Stage 1 predictions only
+        y_pred_boosted: Final predictions (with selective boosting)
+        boosting_mask: Boolean mask indicating which signals were boosted
+    """
+
+    # Stage 1 prediction
+    y_pred_stage1 = batch_inference(
+        base_model, X_test,
+        scalers['stage1_scaler_X'],
+        scalers['stage1_scaler_y'],
+        device,
+        batch_size,
+        "Stage 1"
+    )
+
+    # Stage 2 residual prediction
+    residual_pred = batch_inference(
+        residual_model, X_test,
+        scalers['stage2_scaler_X'],
+        scalers['stage2_scaler_residual'],
+        device,
+        batch_size,
+        "Stage 2"
+    )
+
+    # Full boosting (all signals)
+    y_pred_full_boosted = y_pred_stage1 + residual_pred
+
+    # Selective boosting (only weak signals)
+    if use_selective_boosting and signal_r2_scores is not None:
+        # Identify weak signals (R² < threshold)
+        boosting_mask = signal_r2_scores < r2_threshold
+        num_boosted = np.sum(boosting_mask)
+
+        print(f"Selective Boosting: {num_boosted}/{len(boosting_mask)} signals boosted (R² < {r2_threshold})")
+
+        # Apply boosting only to weak signals
+        y_pred_boosted = y_pred_stage1.copy()
+        y_pred_boosted[:, boosting_mask] = y_pred_full_boosted[:, boosting_mask]
+    else:
+        # Use full boosting for all signals
+        y_pred_boosted = y_pred_full_boosted
+        boosting_mask = np.ones(y_pred_stage1.shape[1], dtype=bool)
+
+    return y_pred_stage1, y_pred_boosted, boosting_mask
+
+
+def compute_per_signal_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray
+) -> Dict[str, np.ndarray]:
+    """
+    Compute detailed metrics for each signal
+
+    Args:
+        y_true: Ground truth (n_samples, n_signals)
+        y_pred: Predictions (n_samples, n_signals)
+
+    Returns:
+        metrics: Dictionary with per-signal metrics
+            - 'mae': Mean Absolute Error per signal
+            - 'rmse': Root Mean Squared Error per signal
+            - 'r2': R² score per signal
+            - 'mape': Mean Absolute Percentage Error per signal
+            - 'true_mean': Mean of true values per signal
+            - 'true_std': Std of true values per signal
+            - 'pred_mean': Mean of predictions per signal
+            - 'pred_std': Std of predictions per signal
+    """
+    n_signals = y_true.shape[1]
+
+    metrics = {
+        'mae': np.zeros(n_signals),
+        'rmse': np.zeros(n_signals),
+        'r2': np.zeros(n_signals),
+        'mape': np.zeros(n_signals),
+        'true_mean': np.zeros(n_signals),
+        'true_std': np.zeros(n_signals),
+        'pred_mean': np.zeros(n_signals),
+        'pred_std': np.zeros(n_signals)
+    }
+
+    for i in range(n_signals):
+        y_t = y_true[:, i]
+        y_p = y_pred[:, i]
+
+        metrics['mae'][i] = mean_absolute_error(y_t, y_p)
+        metrics['rmse'][i] = np.sqrt(mean_squared_error(y_t, y_p))
+
+        var_true = np.var(y_t)
+        if var_true < 1e-10:
+            metrics['r2'][i] = 0.0
+        else:
+            try:
+                metrics['r2'][i] = r2_score(y_t, y_p)
+            except Exception:
+                metrics['r2'][i] = -1.0
+
+        # MAPE for non-zero values
+        non_zero_mask = np.abs(y_t) > 1e-6
+        if np.sum(non_zero_mask) > 0:
+            mape = np.mean(np.abs((y_t[non_zero_mask] - y_p[non_zero_mask]) /
+                                   y_t[non_zero_mask])) * 100
+            metrics['mape'][i] = mape
+        else:
+            metrics['mape'][i] = np.nan
+
+        metrics['true_mean'][i] = np.mean(y_t)
+        metrics['true_std'][i] = np.std(y_t)
+        metrics['pred_mean'][i] = np.mean(y_p)
+        metrics['pred_std'][i] = np.std(y_p)
+
+    return metrics
+
+
+def clear_gpu_memory():
+    """Clean up GPU memory"""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        gc.collect()
+
+
+def print_gpu_memory():
+    """Print GPU memory usage"""
+    if torch.cuda.is_available():
+        allocated = torch.cuda.memory_allocated() / 1024**3
+        reserved = torch.cuda.memory_reserved() / 1024**3
+        print(f"GPU Memory: Allocated {allocated:.2f} GB | Reserved {reserved:.2f} GB")
