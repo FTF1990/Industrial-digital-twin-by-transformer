@@ -762,8 +762,7 @@ def train_stage2_boost_model(
             optimizer,
             mode='min',
             factor=0.5,
-            patience=config.get('scheduler_patience', 10),
-            verbose=True
+            patience=config.get('scheduler_patience', 10)
         )
 
         criterion = nn.MSELoss()
@@ -1304,6 +1303,83 @@ def check_preloaded_data():
         return "⚠️ 尚未加载数据，请选择CSV文件、上传文件或创建示例数据", None, ""
 
 
+def load_signals_config_from_json(json_file):
+    """
+    Load boundary and target signals configuration from JSON file
+
+    Args:
+        json_file: Gradio File object or file path
+
+    Returns:
+        boundary_signals: List of boundary signal names
+        target_signals: List of target signal names
+        status_message: Status message
+    """
+    try:
+        # Handle Gradio File object or direct path
+        if hasattr(json_file, 'name'):
+            file_path = json_file.name
+        else:
+            file_path = json_file
+
+        if not file_path:
+            return [], [], "❌ 请上传JSON配置文件"
+
+        if not os.path.exists(file_path):
+            return [], [], f"❌ 文件不存在: {file_path}"
+
+        # Load JSON
+        with open(file_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+
+        boundary_signals = config.get('boundary_signals', [])
+        target_signals = config.get('target_signals', [])
+
+        if not boundary_signals or not target_signals:
+            return [], [], "❌ JSON文件格式错误，缺少 'boundary_signals' 或 'target_signals'"
+
+        status = f"✅ JSON配置加载成功!\n\n"
+        status += f"📥 边界信号数: {len(boundary_signals)}\n"
+        status += f"📤 目标信号数: {len(target_signals)}\n"
+        status += f"📁 文件: {os.path.basename(file_path)}"
+
+        return boundary_signals, target_signals, status
+
+    except json.JSONDecodeError as e:
+        return [], [], f"❌ JSON解析失败: {str(e)}"
+    except Exception as e:
+        return [], [], f"❌ 加载失败: {str(e)}"
+
+
+def get_available_json_configs():
+    """
+    Get list of available JSON config files in data/ folder
+
+    Returns:
+        List of JSON file paths
+    """
+    try:
+        import glob
+
+        json_files = []
+
+        # Search in data/ folder
+        if os.path.exists('data'):
+            json_files.extend(glob.glob('data/*.json'))
+
+        # Search in current directory
+        json_files.extend(glob.glob('*.json'))
+
+        # Sort by modification time (newest first)
+        json_files = sorted(json_files, key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0, reverse=True)
+
+        return json_files if json_files else []
+
+    except Exception as e:
+        print(f"⚠️ Error in get_available_json_configs: {e}")
+        return []
+
+
 def create_sample_data():
     """Create sample data"""
     try:
@@ -1466,8 +1542,9 @@ def train_base_model_ui(
         # Optimizer
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=10, verbose=True
+            optimizer, mode='min', factor=0.5, patience=10
         )
+        print("📊 学习率调度器: ReduceLROnPlateau (factor=0.5, patience=10)")
         criterion = nn.MSELoss()
 
         # Mixed precision training
@@ -1824,6 +1901,28 @@ def create_unified_interface():
                 with gr.Row():
                     with gr.Column(scale=1):
                         gr.Markdown("### 🎛️ 信号选择")
+
+                        # JSON配置加载
+                        with gr.Accordion("📁 从JSON加载信号配置", open=False):
+                            json_config_selector = gr.Dropdown(
+                                choices=[],
+                                label="选择data文件夹下的JSON配置",
+                                info="或手动上传JSON文件"
+                            )
+                            with gr.Row():
+                                load_json_btn = gr.Button("📂 加载配置", size="sm", variant="secondary")
+                                refresh_json_btn = gr.Button("🔄 刷新", size="sm")
+                            json_upload = gr.File(
+                                label="上传JSON配置文件",
+                                file_types=['.json'],
+                                type="filepath"
+                            )
+                            json_status = gr.Textbox(
+                                label="配置加载状态",
+                                lines=3,
+                                interactive=False
+                            )
+
                         boundary_signals_static = gr.Dropdown(
                             choices=[], label="边界信号 (输入)", multiselect=True
                         )
@@ -2360,6 +2459,9 @@ def create_unified_interface():
             # Get available CSV files (safe - won't break interface)
             csv_files = get_available_csv_files()
 
+            # Get available JSON config files
+            json_configs = get_available_json_configs()
+
             # Check for pre-loaded data (but don't auto-load)
             status, preview_df, signals = check_preloaded_data()
 
@@ -2375,6 +2477,7 @@ def create_unified_interface():
                 gr.update(choices=stage2_keys),
                 gr.update(choices=ensemble_keys),
                 gr.update(choices=csv_files),  # Populate CSV file selector
+                gr.update(choices=json_configs),  # Populate JSON config selector
                 status, signals, preview_df,
                 gr.update(choices=cols), gr.update(choices=cols)
             )
@@ -2384,7 +2487,8 @@ def create_unified_interface():
             outputs=[
                 model_selector, residual_data_selector_stage2,
                 stage2_model_selector, ensemble_selector_reinf,
-                csv_file_selector,  # Add CSV file selector to outputs
+                csv_file_selector,  # CSV file selector
+                json_config_selector,  # JSON config selector
                 data_status, signals_display, data_preview,
                 boundary_signals_static, target_signals_static
             ]
@@ -2463,6 +2567,41 @@ def create_unified_interface():
                 data_status, signals_display, data_preview,
                 boundary_signals_static, target_signals_static
             ]
+        )
+
+        # JSON配置加载事件
+        def load_json_from_selector(json_path):
+            """Load JSON config from dropdown selector"""
+            if not json_path:
+                return gr.update(), gr.update(), "⚠️ 请选择JSON配置文件"
+            boundary, target, status = load_signals_config_from_json(json_path)
+            return gr.update(value=boundary), gr.update(value=target), status
+
+        def load_json_from_upload(json_file):
+            """Load JSON config from uploaded file"""
+            if not json_file:
+                return gr.update(), gr.update(), "⚠️ 请上传JSON配置文件"
+            boundary, target, status = load_signals_config_from_json(json_file)
+            return gr.update(value=boundary), gr.update(value=target), status
+
+        # Load JSON from selector
+        load_json_btn.click(
+            fn=load_json_from_selector,
+            inputs=[json_config_selector],
+            outputs=[boundary_signals_static, target_signals_static, json_status]
+        )
+
+        # Load JSON from uploaded file
+        json_upload.change(
+            fn=load_json_from_upload,
+            inputs=[json_upload],
+            outputs=[boundary_signals_static, target_signals_static, json_status]
+        )
+
+        # Refresh JSON file list
+        refresh_json_btn.click(
+            fn=lambda: gr.update(choices=get_available_json_configs()),
+            outputs=[json_config_selector]
         )
 
         # Training按钮绑定
