@@ -761,9 +761,10 @@ def train_stage2_boost_model(
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
             mode='min',
-            factor=0.5,
-            patience=config.get('scheduler_patience', 10)
+            factor=config.get('scheduler_factor', 0.7),
+            patience=config.get('scheduler_patience', 15)
         )
+        log_msg.append(f"📊 学习率调度器: ReduceLROnPlateau (factor={config.get('scheduler_factor', 0.7)}, patience={config.get('scheduler_patience', 15)})")
 
         criterion = nn.MSELoss()
 
@@ -777,7 +778,9 @@ def train_stage2_boost_model(
             'train_losses': [],
             'val_losses': [],
             'train_r2': [],
-            'val_r2': []
+            'val_r2': [],
+            'train_mae': [],
+            'val_mae': []
         }
 
         best_val_loss = float('inf')
@@ -820,6 +823,7 @@ def train_stage2_boost_model(
             train_preds = np.vstack(train_preds)
             train_targets = np.vstack(train_targets)
             train_r2, _ = compute_r2_safe(train_targets, train_preds, method='per_output_mean')
+            train_mae = mean_absolute_error(train_targets, train_preds)
 
             # Validation phase with mixed precision
             stage2_model.eval()
@@ -842,12 +846,15 @@ def train_stage2_boost_model(
             val_preds = np.vstack(val_preds)
             val_targets = np.vstack(val_targets)
             val_r2, _ = compute_r2_safe(val_targets, val_preds, method='per_output_mean')
+            val_mae = mean_absolute_error(val_targets, val_preds)
 
             # Record history
             history['train_losses'].append(train_loss)
             history['val_losses'].append(val_loss)
             history['train_r2'].append(train_r2)
             history['val_r2'].append(val_r2)
+            history['train_mae'].append(train_mae)
+            history['val_mae'].append(val_mae)
 
             # Learning rate scheduling
             scheduler.step(val_loss)
@@ -862,11 +869,20 @@ def train_stage2_boost_model(
             else:
                 patience_counter += 1
 
-            # Progress output
+            # Progress output (增强版)
             if (epoch + 1) % max(1, config['epochs'] // 20) == 0 or epoch == 0 or epoch == config['epochs'] - 1:
-                msg = f"Epoch {epoch + 1}/{config['epochs']} - "
-                msg += f"Train Loss: {train_loss:.6f}, Train R²: {train_r2:.4f} | "
-                msg += f"Val Loss: {val_loss:.6f}, Val R²: {val_r2:.4f}"
+                # 获取当前学习率
+                current_lr = optimizer.param_groups[0]['lr']
+
+                # 计算RMSE
+                train_rmse = np.sqrt(train_loss)
+                val_rmse = np.sqrt(val_loss)
+
+                msg = f"\nEpoch {epoch + 1}/{config['epochs']}"
+                msg += f"\n  📉 Train: Loss={train_loss:.4f}, RMSE={train_rmse:.4f}, MAE={train_mae:.4f}, R²={train_r2:.4f}"
+                msg += f"\n  📊 Val:   Loss={val_loss:.4f}, RMSE={val_rmse:.4f}, MAE={val_mae:.4f}, R²={val_r2:.4f}"
+                msg += f"\n  🎯 Val/Train Ratio: {val_loss/train_loss:.2f}x"
+                msg += f"\n  📚 LR: {current_lr:.2e}"
                 log_msg.append(msg)
 
                 if progress_callback:
@@ -889,6 +905,14 @@ def train_stage2_boost_model(
         test_mae = mean_absolute_error(y_test, y_test_pred)
         test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
         test_r2, _ = compute_r2_safe(y_test, y_test_pred, method='per_output_mean')
+
+        # Training history summary
+        log_msg.append(f"\n📈 训练历史总结 ({len(history['train_losses'])} epochs):")
+        log_msg.append(f"  最佳验证Loss: {best_val_loss:.4f} (Epoch {np.argmin(history['val_losses']) + 1})")
+        log_msg.append(f"  最佳验证R²: {max(history['val_r2']):.4f} (Epoch {np.argmax(history['val_r2']) + 1})")
+        log_msg.append(f"  最佳验证MAE: {min(history['val_mae']):.4f} (Epoch {np.argmin(history['val_mae']) + 1})")
+        log_msg.append(f"  最终训练Loss: {history['train_losses'][-1]:.4f}")
+        log_msg.append(f"  最终验证Loss: {history['val_losses'][-1]:.4f}")
 
         log_msg.append(f"\n📊 测试集性能:")
         log_msg.append(f"  MAE: {test_mae:.6f}")
@@ -1431,6 +1455,7 @@ def train_base_model_ui(
         epochs, batch_size, lr,
         d_model, nhead, num_layers, dropout,
         test_size, val_size,
+        weight_decay, scheduler_patience, scheduler_factor, grad_clip_norm,
         temporal_signals=None, apply_smoothing=False,
         progress=gr.Progress()
 ):
@@ -1540,20 +1565,28 @@ def train_base_model_ui(
             return f"❌ 不支持的模型类型: {model_type}"
 
         # Optimizer
-        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode='min', factor=0.5, patience=10
+            optimizer, mode='min', factor=scheduler_factor, patience=scheduler_patience
         )
-        print("📊 学习率调度器: ReduceLROnPlateau (factor=0.5, patience=10)")
+        log_messages.append(f"📊 优化器: AdamW (lr={lr:.2e}, weight_decay={weight_decay:.2e})")
+        log_messages.append(f"📊 学习率调度器: ReduceLROnPlateau (factor={scheduler_factor}, patience={scheduler_patience})")
+        log_messages.append(f"✂️ 梯度裁剪: {grad_clip_norm}")
         criterion = nn.MSELoss()
 
         # Mixed precision training
         scaler = GradScaler()
-        grad_clip_norm = 1.0
 
         # Training loop
         log_messages.append(f"\n🎯 开始训练 (混合精度)...")
-        history = {'train_losses': [], 'val_losses': []}
+        history = {
+            'train_losses': [],
+            'val_losses': [],
+            'train_r2': [],
+            'val_r2': [],
+            'train_mae': [],
+            'val_mae': []
+        }
         best_val_loss = float('inf')
         patience_counter = 0
         early_stop_patience = 25
@@ -1562,6 +1595,8 @@ def train_base_model_ui(
             # Training with mixed precision
             model.train()
             train_loss = 0.0
+            train_preds = []
+            train_targets = []
             for batch_X, batch_y in train_loader:
                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
                 optimizer.zero_grad()
@@ -1579,12 +1614,26 @@ def train_base_model_ui(
                 scaler.update()
 
                 train_loss += loss.item()
+                train_preds.append(outputs.detach().cpu().numpy())
+                train_targets.append(batch_y.detach().cpu().numpy())
 
             train_loss /= len(train_loader)
+
+            # Calculate training metrics
+            train_preds_arr = np.vstack(train_preds)
+            train_targets_arr = np.vstack(train_targets)
+
+            # Inverse transform to original space for metrics
+            train_preds_orig = scaler_y.inverse_transform(train_preds_arr)
+            train_targets_orig = scaler_y.inverse_transform(train_targets_arr)
+            train_r2, _ = compute_r2_safe(train_targets_orig, train_preds_orig, method='per_output_mean')
+            train_mae = mean_absolute_error(train_targets_orig, train_preds_orig)
 
             # Validation with mixed precision
             model.eval()
             val_loss = 0.0
+            val_preds = []
+            val_targets = []
             with torch.no_grad():
                 for batch_X, batch_y in val_loader:
                     batch_X, batch_y = batch_X.to(device), batch_y.to(device)
@@ -1592,11 +1641,27 @@ def train_base_model_ui(
                         outputs = model(batch_X)
                         loss = criterion(outputs, batch_y)
                     val_loss += loss.item()
+                    val_preds.append(outputs.cpu().numpy())
+                    val_targets.append(batch_y.cpu().numpy())
 
             val_loss /= len(val_loader)
 
+            # Calculate validation metrics
+            val_preds_arr = np.vstack(val_preds)
+            val_targets_arr = np.vstack(val_targets)
+
+            # Inverse transform to original space for metrics
+            val_preds_orig = scaler_y.inverse_transform(val_preds_arr)
+            val_targets_orig = scaler_y.inverse_transform(val_targets_arr)
+            val_r2, _ = compute_r2_safe(val_targets_orig, val_preds_orig, method='per_output_mean')
+            val_mae = mean_absolute_error(val_targets_orig, val_preds_orig)
+
             history['train_losses'].append(train_loss)
             history['val_losses'].append(val_loss)
+            history['train_r2'].append(train_r2)
+            history['val_r2'].append(val_r2)
+            history['train_mae'].append(train_mae)
+            history['val_mae'].append(val_mae)
 
             scheduler.step(val_loss)
 
@@ -1608,11 +1673,23 @@ def train_base_model_ui(
             else:
                 patience_counter += 1
 
-            # 进度显示
+            # 进度显示 (增强版 - 显示MAE, RMSE, R2和学习率)
             if (epoch + 1) % max(1, epochs // 20) == 0 or epoch == 0:
-                msg = f"Epoch {epoch + 1}/{epochs} - Train Loss: {train_loss:.6f}, Val Loss: {val_loss:.6f}"
+                # 获取当前学习率
+                current_lr = optimizer.param_groups[0]['lr']
+
+                # 计算RMSE (更直观)
+                train_rmse = np.sqrt(train_loss)
+                val_rmse = np.sqrt(val_loss)
+
+                msg = f"\nEpoch {epoch + 1}/{epochs}"
+                msg += f"\n  📉 Train: Loss={train_loss:.4f}, RMSE={train_rmse:.4f}, MAE={train_mae:.4f}, R²={train_r2:.4f}"
+                msg += f"\n  📊 Val:   Loss={val_loss:.4f}, RMSE={val_rmse:.4f}, MAE={val_mae:.4f}, R²={val_r2:.4f}"
+                msg += f"\n  🎯 Val/Train Ratio: {val_loss/train_loss:.2f}x"
+                msg += f"\n  📚 LR: {current_lr:.2e}"
+
                 log_messages.append(msg)
-                progress((epoch + 1) / epochs, desc=msg)
+                progress((epoch + 1) / epochs, desc=f"Epoch {epoch+1}/{epochs} - Val R²: {val_r2:.4f}")
 
             if patience_counter >= early_stop_patience:
                 log_messages.append(f"\n⏸️ 早停触发 (Epoch {epoch + 1})")
@@ -1630,6 +1707,14 @@ def train_base_model_ui(
         test_mae = mean_absolute_error(y_test, y_test_pred)
         test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
         test_r2, _ = compute_r2_safe(y_test, y_test_pred, method='per_output_mean')
+
+        # Training history summary
+        log_messages.append(f"\n📈 训练历史总结 ({len(history['train_losses'])} epochs):")
+        log_messages.append(f"  最佳验证Loss: {best_val_loss:.4f} (Epoch {np.argmin(history['val_losses']) + 1})")
+        log_messages.append(f"  最佳验证R²: {max(history['val_r2']):.4f} (Epoch {np.argmax(history['val_r2']) + 1})")
+        log_messages.append(f"  最佳验证MAE: {min(history['val_mae']):.4f} (Epoch {np.argmin(history['val_mae']) + 1})")
+        log_messages.append(f"  最终训练Loss: {history['train_losses'][-1]:.4f}")
+        log_messages.append(f"  最终验证Loss: {history['val_losses'][-1]:.4f}")
 
         log_messages.append(f"\n📊 测试集性能:")
         log_messages.append(f"  MAE: {test_mae:.6f}")
@@ -1713,8 +1798,74 @@ def train_base_model_ui(
 # ============================================================================
 # Residual extraction functions
 
-def extract_residuals_ui(model_name, future_horizon, use_segment, start_index, end_index):
-    """UI function for residual extraction"""
+def get_inference_config_files():
+    """
+    Get list of inference config JSON files in saved_models folder
+
+    Returns:
+        List of inference config file paths
+    """
+    try:
+        import glob
+
+        config_files = []
+
+        # Search in saved_models folder and subdirectories
+        if os.path.exists('saved_models'):
+            config_files.extend(glob.glob('saved_models/**/*_inference.json', recursive=True))
+
+        # Sort by modification time (newest first)
+        config_files = sorted(config_files, key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0, reverse=True)
+
+        return config_files if config_files else []
+
+    except Exception as e:
+        print(f"⚠️ Error in get_inference_config_files: {e}")
+        return []
+
+
+def load_model_from_inference_config_path(config_path):
+    """
+    Load model from inference config file path
+
+    Args:
+        config_path: Path to inference config JSON file
+
+    Returns:
+        model_name: Loaded model name
+        status: Status message
+    """
+    try:
+        if not config_path:
+            return None, "❌ 请选择推理配置文件"
+
+        if not os.path.exists(config_path):
+            return None, f"❌ 文件不存在: {config_path}"
+
+        # Load config
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+
+        model_name = config.get('model_name')
+        if not model_name:
+            return None, "❌ 配置文件中缺少 model_name"
+
+        status = f"✅ 配置加载成功!\n\n"
+        status += f"📁 配置文件: {os.path.basename(config_path)}\n"
+        status += f"🤖 模型名称: {model_name}\n"
+        status += f"📥 边界信号数: {len(config.get('boundary_signals', []))}\n"
+        status += f"📤 目标信号数: {len(config.get('target_signals', []))}"
+
+        return model_name, status
+
+    except json.JSONDecodeError as e:
+        return None, f"❌ JSON解析失败: {str(e)}"
+    except Exception as e:
+        return None, f"❌ 加载失败: {str(e)}"
+
+
+def extract_residuals_ui(model_name):
+    """UI function for residual extraction - full dataset inference"""
     try:
         if not model_name:
             return "❌ 请选择模型！", None
@@ -1724,38 +1875,110 @@ def extract_residuals_ui(model_name, future_horizon, use_segment, start_index, e
 
         log_msg = []
         log_msg.append("=" * 80)
-        log_msg.append("📊 开始提取残差")
+        log_msg.append("📊 开始提取残差（全数据集）")
         log_msg.append("=" * 80)
 
         df = global_state['df']
+        log_msg.append(f"\n📈 数据集大小: {len(df):,} 条")
 
-        # Segment selection
-        if use_segment:
-            start_idx = max(0, int(start_index))
-            end_idx = min(len(df), int(end_index))
-            df_segment = df.iloc[start_idx:end_idx].copy()
-            log_msg.append(f"\n✂️ 使用数据片段: index [{start_idx}, {end_idx})")
-            log_msg.append(f"   片段长度: {len(df_segment):,}")
-        else:
-            df_segment = df.copy()
-            log_msg.append(f"\n📈 使用全部数据: {len(df_segment):,} 条")
+        # Load model
+        model_path = os.path.join("saved_models", f"{model_name}.pth")
+        if not os.path.exists(model_path):
+            return f"❌ 模型文件不存在: {model_path}", None
 
-        # Use ResidualExtractor to extract residuals
-        from residual_tft import ResidualExtractor
+        log_msg.append(f"\n📥 加载模型: {model_name}")
+        checkpoint = torch.load(model_path, map_location=device)
 
-        residuals_df, info = ResidualExtractor.extract_residuals_from_trained_models(
-            model_name, df_segment, global_state, device
+        model_config = checkpoint['model_config']
+        boundary_signals = model_config['boundary_signals']
+        target_signals = model_config['target_signals']
+
+        log_msg.append(f"  边界信号数: {len(boundary_signals)}")
+        log_msg.append(f"  目标信号数: {len(target_signals)}")
+
+        # Check if signals exist in dataframe
+        missing_boundary = [s for s in boundary_signals if s not in df.columns]
+        missing_target = [s for s in target_signals if s not in df.columns]
+
+        if missing_boundary:
+            return f"❌ 数据集中缺少边界信号: {missing_boundary}", None
+        if missing_target:
+            return f"❌ 数据集中缺少目标信号: {missing_target}", None
+
+        # Prepare data
+        X = df[boundary_signals].values
+        y = df[target_signals].values
+
+        # Load scalers
+        scalers = checkpoint['scalers']
+        scaler_X = scalers['X']
+        scaler_y = scalers['y']
+
+        # Load model
+        config = model_config['config']
+        model = StaticSensorTransformer(
+            num_boundary_sensors=len(boundary_signals),
+            num_target_sensors=len(target_signals),
+            d_model=config['d_model'],
+            nhead=config['nhead'],
+            num_layers=config['num_layers'],
+            dropout=config['dropout']
+        ).to(device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+
+        log_msg.append(f"\n🔄 开始推理...")
+
+        # Batch inference
+        from models.residual_tft import batch_inference
+        y_pred = batch_inference(
+            model, X, scaler_X, scaler_y, device,
+            batch_size=512, model_name="SST"
         )
 
-        if residuals_df.empty:
-            return "❌ 残差提取失败！", None
+        # Calculate residuals in original space
+        residuals = y - y_pred
+
+        # Calculate metrics
+        from models.residual_tft import compute_r2_safe
+        r2, per_signal_r2 = compute_r2_safe(y, y_pred, method='per_output_mean')
+        mae = mean_absolute_error(y, y_pred)
+        rmse = np.sqrt(mean_squared_error(y, y_pred))
+
+        log_msg.append(f"\n📊 推理完成:")
+        log_msg.append(f"  MAE: {mae:.6f}")
+        log_msg.append(f"  RMSE: {rmse:.6f}")
+        log_msg.append(f"  R²: {r2:.4f}")
+
+        # Create residuals dataframe
+        residual_cols = [f"{sig}_residual" for sig in target_signals]
+        pred_cols = [f"{sig}_pred" for sig in target_signals]
+        true_cols = [f"{sig}_true" for sig in target_signals]
+
+        residuals_data = {}
+        for i, sig in enumerate(target_signals):
+            residuals_data[f"{sig}_residual"] = residuals[:, i]
+            residuals_data[f"{sig}_pred"] = y_pred[:, i]
+            residuals_data[f"{sig}_true"] = y[:, i]
+
+        residuals_df = pd.DataFrame(residuals_data)
 
         # Save residual data
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        residual_key = f"{model_name}_{timestamp}_h{future_horizon}"
+        residual_key = f"{model_name}_{timestamp}"
 
-        info['future_horizon'] = future_horizon
-        info['base_model_name'] = model_name
+        info = {
+            'base_model_name': model_name,
+            'boundary_signals': boundary_signals,
+            'target_signals': target_signals,
+            'residual_signals': residual_cols,
+            'metrics': {
+                'mae': float(mae),
+                'rmse': float(rmse),
+                'r2': float(r2),
+                'per_signal_r2': per_signal_r2.tolist() if isinstance(per_signal_r2, np.ndarray) else per_signal_r2
+            }
+        }
 
         global_state['residual_data'][residual_key] = {
             'data': residuals_df,
@@ -1932,17 +2155,25 @@ def create_unified_interface():
 
                         gr.Markdown("### 🏗️ 模型架构")
                         with gr.Row():
-                            d_model_static = gr.Slider(32, 512, 128, 32, label="模型维度")
-                            nhead_static = gr.Slider(2, 16, 8, 2, label="注意力头数")
-                        num_layers_static = gr.Slider(1, 8, 3, 1, label="Transformer层数")
+                            d_model_static = gr.Slider(32, 1280, 256, 32, label="模型维度")
+                            nhead_static = gr.Slider(2, 80, 16, 2, label="注意力头数")
+                        with gr.Row():
+                            num_layers_static = gr.Slider(1, 30, 6, 1, label="Transformer层数")
+                            dropout_static = gr.Slider(0, 0.5, 0.1, 0.05, label="Dropout率")
 
                         gr.Markdown("### 🎯 训练参数")
                         with gr.Row():
-                            epochs_static = gr.Slider(10, 500, 100, 10, label="训练轮数")
-                            batch_size_static = gr.Slider(16, 256, 64, 16, label="批大小")
+                            epochs_static = gr.Slider(10, 250, 50, 10, label="训练轮数")
+                            batch_size_static = gr.Slider(16, 2560, 512, 16, label="批大小")
                         with gr.Row():
-                            lr_static = gr.Number(value=0.001, label="学习率")
-                            dropout_static = gr.Slider(0, 0.5, 0.1, 0.05, label="Dropout率")
+                            lr_static = gr.Number(value=0.0001, label="学习率")
+                            weight_decay_static = gr.Number(value=1e-5, label="权重衰减")
+
+                        gr.Markdown("### ⚙️ 优化器设置")
+                        with gr.Row():
+                            grad_clip_norm_static = gr.Slider(0.1, 5.0, 1.0, 0.1, label="梯度裁剪")
+                            scheduler_patience_static = gr.Slider(1, 15, 3, 1, label="学习率调度耐心值")
+                        scheduler_factor_static = gr.Slider(0.1, 0.9, 0.5, 0.1, label="学习率衰减因子")
 
                         gr.Markdown("### 🔀 数据分割")
                         with gr.Row():
@@ -1963,6 +2194,7 @@ def create_unified_interface():
             # Tab 3: 残差提取
             with gr.Tab("🔬 残差提取", elem_id="residual_extraction"):
                 gr.Markdown("## 从训练好的SST模型提取残差")
+                gr.Markdown("对整个数据集进行推理，生成残差用于Stage2训练")
 
                 with gr.Row():
                     with gr.Column(scale=1):
@@ -1970,85 +2202,52 @@ def create_unified_interface():
                             choices=get_available_models(),
                             label="选择SST模型"
                         )
-                        refresh_models_btn = gr.Button("🔄 刷新", size="sm")
+                        refresh_models_btn = gr.Button("🔄 刷新模型列表", size="sm")
 
-                        future_horizon = gr.Slider(
-                            1, 100, 10, 1,
-                            label="未来预测长度",
-                            info="用于后续TFT训练的未来步数"
-                        )
+                        gr.Markdown("### 📤 推理配置文件（可选）")
+                        gr.Markdown("可选择已保存的推理配置文件来加载模型")
 
-                        gr.Markdown("### ✂️ 数据片段选择（可选）")
-                        use_segment_checkbox = gr.Checkbox(
-                            label="使用数据片段",
-                            value=False
+                        inference_config_selector = gr.Dropdown(
+                            choices=[],
+                            label="选择saved_models文件夹下的推理配置",
+                            info="选择 *_inference.json 文件"
                         )
                         with gr.Row():
-                            start_index_input = gr.Number(value=0, label="起始索引", precision=0)
-                            end_index_input = gr.Number(value=10000, label="结束索引", precision=0)
+                            load_inference_btn = gr.Button("📥 加载配置", size="sm", variant="secondary")
+                            refresh_inference_btn = gr.Button("🔄 刷新配置列表", size="sm")
 
-                        with gr.Row():
-                            preset_10k_btn = gr.Button("0-10K", size="sm")
-                            preset_50k_btn = gr.Button("0-50K", size="sm")
-                            preset_100k_btn = gr.Button("0-100K", size="sm")
-                            preset_200k_btn = gr.Button("0-200K", size="sm")
+                        inference_load_status = gr.Textbox(label="配置加载状态", lines=3, interactive=False)
 
-                        extract_btn = gr.Button("🔬 提取残差", variant="primary", size="lg")
-
-                        gr.Markdown("### 📤 加载推理配置")
-                        inference_config_file = gr.File(
-                            label="上传推理配置文件 (*_inference.json)",
-                            file_types=['.json']
-                        )
-                        load_inference_btn = gr.Button("📥 加载配置", size="sm")
-                        inference_load_status = gr.Textbox(label="加载状态", lines=3, interactive=False)
+                        extract_btn = gr.Button("🔬 提取残差（全数据集）", variant="primary", size="lg")
 
                     with gr.Column(scale=1):
-                        residual_status = gr.Textbox(label="残差提取状态", lines=15, interactive=False)
+                        residual_status = gr.Textbox(label="残差提取状态", lines=20, interactive=False)
                         residual_plot = gr.Plot(label="残差可视化")
 
                 # Event binding
-                def set_range_preset(start, end):
-                    return start, end, True
-
-                preset_10k_btn.click(
-                    fn=lambda: set_range_preset(0, 10000),
-                    outputs=[start_index_input, end_index_input, use_segment_checkbox]
-                )
-                preset_50k_btn.click(
-                    fn=lambda: set_range_preset(0, 50000),
-                    outputs=[start_index_input, end_index_input, use_segment_checkbox]
-                )
-                preset_100k_btn.click(
-                    fn=lambda: set_range_preset(0, 100000),
-                    outputs=[start_index_input, end_index_input, use_segment_checkbox]
-                )
-                preset_200k_btn.click(
-                    fn=lambda: set_range_preset(0, 200000),
-                    outputs=[start_index_input, end_index_input, use_segment_checkbox]
-                )
-
                 refresh_models_btn.click(
                     fn=lambda: gr.update(choices=get_available_models()),
                     outputs=[model_selector]
                 )
 
-                extract_btn.click(
-                    fn=extract_residuals_ui,
-                    inputs=[
-                        model_selector,
-                        future_horizon,
-                        use_segment_checkbox,
-                        start_index_input,
-                        end_index_input
-                    ],
-                    outputs=[residual_status, residual_plot]
+                # Refresh inference config list
+                refresh_inference_btn.click(
+                    fn=lambda: gr.update(choices=get_inference_config_files()),
+                    outputs=[inference_config_selector]
                 )
 
+                # Load inference config from selector
                 load_inference_btn.click(
-                    fn=lambda f: load_model_from_inference_config(f.name, device) if f else (None, "❌ 请上传文件"),
-                    inputs=[inference_config_file],
+                    fn=load_model_from_inference_config_path,
+                    inputs=[inference_config_selector],
                     outputs=[model_selector, inference_load_status]
+                )
+
+                # Extract residuals (full dataset)
+                extract_btn.click(
+                    fn=extract_residuals_ui,
+                    inputs=[model_selector],
+                    outputs=[residual_status, residual_plot]
                 )
 
             # Tab 4: Stage2 BoostTraining
@@ -2067,20 +2266,25 @@ def create_unified_interface():
 
                         gr.Markdown("### 🏗️ 模型架构")
                         with gr.Row():
-                            d_model_stage2 = gr.Slider(32, 256, 128, 32, label="模型维度")
-                            nhead_stage2 = gr.Slider(2, 16, 8, 2, label="注意力头数")
-                        num_layers_stage2 = gr.Slider(1, 8, 3, 1, label="Transformer层数")
+                            d_model_stage2 = gr.Slider(32, 640, 128, 32, label="模型维度")
+                            nhead_stage2 = gr.Slider(2, 40, 8, 2, label="注意力头数")
+                        with gr.Row():
+                            num_layers_stage2 = gr.Slider(1, 20, 4, 1, label="Transformer层数")
+                            dropout_stage2 = gr.Slider(0, 0.5, 0.15, 0.05, label="Dropout率")
 
                         gr.Markdown("### 🎯 训练参数")
                         with gr.Row():
-                            epochs_stage2 = gr.Slider(10, 200, 100, 10, label="训练轮数")
-                            batch_size_stage2 = gr.Slider(16, 128, 32, 16, label="批大小")
+                            epochs_stage2 = gr.Slider(10, 400, 80, 10, label="训练轮数")
+                            batch_size_stage2 = gr.Slider(16, 2560, 512, 16, label="批大小")
                         with gr.Row():
-                            lr_stage2 = gr.Number(value=0.001, label="学习率")
-                            dropout_stage2 = gr.Slider(0, 0.5, 0.1, 0.05, label="Dropout率")
+                            lr_stage2 = gr.Number(value=0.0001, label="学习率")
+                            weight_decay_stage2 = gr.Number(value=5e-6, label="权重衰减")
+
+                        gr.Markdown("### ⚙️ 优化器设置")
                         with gr.Row():
-                            weight_decay_stage2 = gr.Number(value=1e-5, label="权重衰减")
-                            grad_clip_stage2 = gr.Slider(0.1, 5.0, 1.0, 0.1, label="梯度裁剪")
+                            grad_clip_stage2 = gr.Slider(0.1, 2.5, 0.5, 0.1, label="梯度裁剪")
+                            scheduler_patience_stage2 = gr.Slider(1, 75, 15, 1, label="学习率调度耐心值")
+                        scheduler_factor_stage2 = gr.Slider(0.1, 0.9, 0.7, 0.1, label="学习率衰减因子")
 
                         gr.Markdown("### 🔀 数据分割")
                         with gr.Row():
@@ -2101,6 +2305,7 @@ def create_unified_interface():
                 # Stage2Training函数
                 def train_stage2_ui(residual_data_key, d_model, nhead, num_layers, dropout,
                                     epochs, batch_size, lr, weight_decay, grad_clip,
+                                    scheduler_patience, scheduler_factor,
                                     test_size, val_size, progress=gr.Progress()):
 
                     config = {
@@ -2113,10 +2318,11 @@ def create_unified_interface():
                         'lr': float(lr),
                         'weight_decay': float(weight_decay),
                         'grad_clip': float(grad_clip),
+                        'scheduler_patience': int(scheduler_patience),
+                        'scheduler_factor': float(scheduler_factor),
                         'test_size': float(test_size),
                         'val_size': float(val_size),
-                        'early_stop_patience': 25,
-                        'scheduler_patience': 10
+                        'early_stop_patience': 25
                     }
 
                     def progress_callback(msg):
@@ -2141,6 +2347,7 @@ def create_unified_interface():
                         d_model_stage2, nhead_stage2, num_layers_stage2, dropout_stage2,
                         epochs_stage2, batch_size_stage2, lr_stage2,
                         weight_decay_stage2, grad_clip_stage2,
+                        scheduler_patience_stage2, scheduler_factor_stage2,
                         test_size_stage2, val_size_stage2
                     ],
                     outputs=[stage2_training_log]
@@ -2462,6 +2669,9 @@ def create_unified_interface():
             # Get available JSON config files
             json_configs = get_available_json_configs()
 
+            # Get available inference config files
+            inference_configs = get_inference_config_files()
+
             # Check for pre-loaded data (but don't auto-load)
             status, preview_df, signals = check_preloaded_data()
 
@@ -2478,6 +2688,7 @@ def create_unified_interface():
                 gr.update(choices=ensemble_keys),
                 gr.update(choices=csv_files),  # Populate CSV file selector
                 gr.update(choices=json_configs),  # Populate JSON config selector
+                gr.update(choices=inference_configs),  # Populate inference config selector
                 status, signals, preview_df,
                 gr.update(choices=cols), gr.update(choices=cols)
             )
@@ -2488,7 +2699,8 @@ def create_unified_interface():
                 model_selector, residual_data_selector_stage2,
                 stage2_model_selector, ensemble_selector_reinf,
                 csv_file_selector,  # CSV file selector
-                json_config_selector,  # JSON config selector
+                json_config_selector,  # JSON config selector (Tab2)
+                inference_config_selector,  # Inference config selector (Tab3)
                 data_status, signals_display, data_preview,
                 boundary_signals_static, target_signals_static
             ]
@@ -2613,6 +2825,7 @@ def create_unified_interface():
                 epochs_static, batch_size_static, lr_static,
                 d_model_static, nhead_static, num_layers_static, dropout_static,
                 test_size_static, val_size_static,
+                weight_decay_static, scheduler_patience_static, scheduler_factor_static, grad_clip_norm_static,
                 gr.State(value=None), gr.State(value=False)
             ],
             outputs=[training_log_static]
