@@ -644,7 +644,7 @@ def load_model_from_inference_config(config_file_path, device):
 def train_stage2_boost_model(
         residual_data_key: str,
         config: Dict[str, Any],
-        progress_callback=None
+        progress=None
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Train Stage2 Boost residual model
@@ -652,7 +652,7 @@ def train_stage2_boost_model(
     Args:
         residual_data_key: Residual data key
         config: Training config
-        progress_callback: Progress callback function
+        progress: Gradio progress object for real-time updates
 
     Returns:
         status_msg: Training status message
@@ -885,8 +885,9 @@ def train_stage2_boost_model(
                 msg += f"\n  📚 LR: {current_lr:.2e}"
                 log_msg.append(msg)
 
-                if progress_callback:
-                    progress_callback("\n".join(log_msg))
+                # Update progress bar with current status
+                if progress:
+                    progress((epoch + 1) / config['epochs'], desc=f"Epoch {epoch+1}/{config['epochs']} - Val R²: {val_r2:.4f}")
 
             # Early stopping
             if patience_counter >= early_stop_patience:
@@ -2633,12 +2634,9 @@ def create_unified_interface():
                         'early_stop_patience': 25
                     }
 
-                    def progress_callback(msg):
-                        progress(0.5, desc="训练中...")
-                        return msg
-
+                    # Call training function with progress parameter
                     status_msg, results = train_stage2_boost_model(
-                        residual_data_key, config, progress_callback
+                        residual_data_key, config, progress=progress
                     )
 
                     return status_msg
