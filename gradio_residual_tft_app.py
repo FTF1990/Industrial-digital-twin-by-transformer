@@ -174,7 +174,7 @@ def load_tft_model_from_config(config_file_path: str, device: torch.device) -> T
             return None, f"❌ Scaler文件不存在: {scaler_path}"
 
         # Load model
-        checkpoint = torch.load(model_path, map_location=device)
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
         model_config = checkpoint['model_config']
 
         # Rebuild TFT model
@@ -359,7 +359,7 @@ def load_saved_models():
             scaler_path = os.path.join(model_dir, f"{model_name}_scalers.pkl")
 
             try:
-                checkpoint = torch.load(model_path, map_location=device)
+                checkpoint = torch.load(model_path, map_location=device, weights_only=False)
                 model_config = checkpoint['model_config']
 
                 if model_config['type'] == 'StaticSensorTransformer':
@@ -585,7 +585,7 @@ def load_model_from_inference_config(config_file_path, device):
             return None, f"❌ Scaler文件不存在: {scaler_path}"
 
         # Load model
-        checkpoint = torch.load(model_path, map_location=device)
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
         arch = config['architecture']
 
         if model_type == 'StaticSensorTransformer':
@@ -1887,7 +1887,7 @@ def extract_residuals_ui(model_name):
             return f"❌ 模型文件不存在: {model_path}", None
 
         log_msg.append(f"\n📥 加载模型: {model_name}")
-        checkpoint = torch.load(model_path, map_location=device)
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
 
         model_config = checkpoint['model_config']
         boundary_signals = model_config['boundary_signals']
