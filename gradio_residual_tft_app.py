@@ -1824,6 +1824,32 @@ def get_inference_config_files():
         return []
 
 
+def get_scalers_files():
+    """
+    Get list of scaler pkl files in saved_models folder
+
+    Returns:
+        List of scaler file paths
+    """
+    try:
+        import glob
+
+        scaler_files = []
+
+        # Search in saved_models folder and subdirectories
+        if os.path.exists('saved_models'):
+            scaler_files.extend(glob.glob('saved_models/**/*_scalers.pkl', recursive=True))
+
+        # Sort by modification time (newest first)
+        scaler_files = sorted(scaler_files, key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0, reverse=True)
+
+        return scaler_files if scaler_files else []
+
+    except Exception as e:
+        print(f"⚠️ Error in get_scalers_files: {e}")
+        return []
+
+
 def load_model_from_inference_config_path(config_path):
     """
     Load model from inference config file path
@@ -1864,26 +1890,29 @@ def load_model_from_inference_config_path(config_path):
         return None, f"❌ 加载失败: {str(e)}"
 
 
-def load_scalers_file(scaler_file, model_name):
+def load_scalers_from_path(scaler_path, model_name):
     """
-    Load scalers from a pickle file for a specific model
+    Load scalers from a pickle file path for a specific model
 
     Args:
-        scaler_file: Uploaded scaler file object
+        scaler_path: Path to scaler pickle file
         model_name: Model name to associate the scalers with
 
     Returns:
         status_msg: Status message
     """
     try:
-        if not scaler_file:
-            return "❌ 请上传scalers文件！"
+        if not scaler_path:
+            return "❌ 请选择scalers文件！"
 
         if not model_name:
             return "❌ 请先选择模型！"
 
+        if not os.path.exists(scaler_path):
+            return f"❌ 文件不存在: {scaler_path}"
+
         # Load scalers from file
-        with open(scaler_file.name, 'rb') as f:
+        with open(scaler_path, 'rb') as f:
             scalers = pickle.load(f)
 
         # Save to global state
@@ -2018,6 +2047,12 @@ def extract_residuals_ui(model_name):
         true_cols = [f"{sig}_true" for sig in target_signals]
 
         residuals_data = {}
+
+        # Add boundary signals (input features) - needed for Stage2 training
+        for i, sig in enumerate(boundary_signals):
+            residuals_data[sig] = X[:, i]
+
+        # Add residuals, predictions, and true values
         for i, sig in enumerate(target_signals):
             residuals_data[f"{sig}_residual"] = residuals[:, i]
             residuals_data[f"{sig}_pred"] = y_pred[:, i]
@@ -2281,12 +2316,15 @@ def create_unified_interface():
                         inference_load_status = gr.Textbox(label="配置加载状态", lines=3, interactive=False)
 
                         gr.Markdown("### 📊 加载Scalers文件（可选）")
-                        gr.Markdown("如果模型checkpoint中不包含scalers，需要手动上传")
-                        scalers_file = gr.File(
-                            label="上传Scalers文件 (*_scalers.pkl)",
-                            file_types=['.pkl']
+                        gr.Markdown("如果模型checkpoint中不包含scalers，从saved_models文件夹选择")
+                        scalers_file_selector = gr.Dropdown(
+                            choices=[],
+                            label="选择saved_models文件夹下的Scalers文件",
+                            info="选择 *_scalers.pkl 文件"
                         )
-                        load_scalers_btn = gr.Button("📥 加载Scalers", size="sm", variant="secondary")
+                        with gr.Row():
+                            load_scalers_btn = gr.Button("📥 加载Scalers", size="sm", variant="secondary")
+                            refresh_scalers_btn = gr.Button("🔄 刷新Scalers列表", size="sm")
                         scalers_load_status = gr.Textbox(label="Scalers加载状态", lines=3, interactive=False)
 
                         extract_btn = gr.Button("🔬 提取残差（全数据集）", variant="primary", size="lg")
@@ -2314,10 +2352,16 @@ def create_unified_interface():
                     outputs=[model_selector, inference_load_status]
                 )
 
+                # Refresh scalers file list
+                refresh_scalers_btn.click(
+                    fn=lambda: gr.update(choices=get_scalers_files()),
+                    outputs=[scalers_file_selector]
+                )
+
                 # Load scalers file
                 load_scalers_btn.click(
-                    fn=lambda f, m: load_scalers_file(f, m) if f else "❌ 请上传文件",
-                    inputs=[scalers_file, model_selector],
+                    fn=load_scalers_from_path,
+                    inputs=[scalers_file_selector, model_selector],
                     outputs=[scalers_load_status]
                 )
 
