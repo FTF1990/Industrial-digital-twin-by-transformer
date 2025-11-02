@@ -1864,6 +1864,53 @@ def load_model_from_inference_config_path(config_path):
         return None, f"❌ 加载失败: {str(e)}"
 
 
+def load_scalers_file(scaler_file, model_name):
+    """
+    Load scalers from a pickle file for a specific model
+
+    Args:
+        scaler_file: Uploaded scaler file object
+        model_name: Model name to associate the scalers with
+
+    Returns:
+        status_msg: Status message
+    """
+    try:
+        if not scaler_file:
+            return "❌ 请上传scalers文件！"
+
+        if not model_name:
+            return "❌ 请先选择模型！"
+
+        # Load scalers from file
+        with open(scaler_file.name, 'rb') as f:
+            scalers = pickle.load(f)
+
+        # Save to global state
+        if 'manual_scalers' not in global_state:
+            global_state['manual_scalers'] = {}
+
+        global_state['manual_scalers'][model_name] = scalers
+
+        success_msg = f"✅ Scalers加载成功!\n\n"
+        success_msg += f"📌 Model name: {model_name}\n"
+        success_msg += f"📊 Scalers包含: {list(scalers.keys())}\n"
+
+        # Verify scalers have required keys
+        if 'X' in scalers and 'y' in scalers:
+            success_msg += f"✓ 包含必需的X和y scalers\n"
+        else:
+            success_msg += f"⚠️ 警告: scalers可能缺少X或y键\n"
+
+        print(success_msg)
+        return success_msg
+
+    except Exception as e:
+        error_msg = f"❌ Scalers加载失败:\n{str(e)}\n\n{traceback.format_exc()}"
+        print(error_msg)
+        return error_msg
+
+
 def extract_residuals_ui(model_name):
     """UI function for residual extraction - full dataset inference"""
     try:
@@ -1909,8 +1956,23 @@ def extract_residuals_ui(model_name):
         X = df[boundary_signals].values
         y = df[target_signals].values
 
-        # Load scalers
-        scalers = checkpoint['scalers']
+        # Load scalers - try checkpoint first, then manual_scalers
+        scalers = None
+        if 'scalers' in checkpoint:
+            scalers = checkpoint['scalers']
+            log_msg.append(f"  ✓ 从checkpoint加载scalers")
+        elif 'manual_scalers' in global_state and model_name in global_state['manual_scalers']:
+            scalers = global_state['manual_scalers'][model_name]
+            log_msg.append(f"  ✓ 从手动加载的scalers加载")
+        else:
+            error_msg = "❌ 未找到scalers！\n\n"
+            error_msg += f"checkpoint中无scalers，且未手动加载scalers。\n\n"
+            error_msg += "💡 解决方法:\n"
+            error_msg += "1. 在下方'加载Scalers文件'区域上传对应的scalers.pkl文件\n"
+            error_msg += f"2. 文件名应该类似: {model_name}_scalers.pkl\n"
+            error_msg += "3. 点击'📥 加载Scalers'按钮后，再次点击'🔬 提取残差'按钮\n"
+            return error_msg, None
+
         scaler_X = scalers['X']
         scaler_y = scalers['y']
 
@@ -2218,6 +2280,15 @@ def create_unified_interface():
 
                         inference_load_status = gr.Textbox(label="配置加载状态", lines=3, interactive=False)
 
+                        gr.Markdown("### 📊 加载Scalers文件（可选）")
+                        gr.Markdown("如果模型checkpoint中不包含scalers，需要手动上传")
+                        scalers_file = gr.File(
+                            label="上传Scalers文件 (*_scalers.pkl)",
+                            file_types=['.pkl']
+                        )
+                        load_scalers_btn = gr.Button("📥 加载Scalers", size="sm", variant="secondary")
+                        scalers_load_status = gr.Textbox(label="Scalers加载状态", lines=3, interactive=False)
+
                         extract_btn = gr.Button("🔬 提取残差（全数据集）", variant="primary", size="lg")
 
                     with gr.Column(scale=1):
@@ -2241,6 +2312,13 @@ def create_unified_interface():
                     fn=load_model_from_inference_config_path,
                     inputs=[inference_config_selector],
                     outputs=[model_selector, inference_load_status]
+                )
+
+                # Load scalers file
+                load_scalers_btn.click(
+                    fn=lambda f, m: load_scalers_file(f, m) if f else "❌ 请上传文件",
+                    inputs=[scalers_file, model_selector],
+                    outputs=[scalers_load_status]
                 )
 
                 # Extract residuals (full dataset)
