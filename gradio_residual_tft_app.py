@@ -1699,7 +1699,7 @@ def compute_signal_r2_and_select_threshold(
             },
             'predictions': {
                 'y_true': y_true_test,
-                'y_pred_stage1': y_pred_stage1_test,
+                'y_pred_base': y_pred_stage1_test,  # 使用y_pred_base以匹配tab6的读取
                 'y_pred_ensemble': y_ensemble_test,
                 'y_residual_pred': y_residual_pred_test
             },
