@@ -1298,35 +1298,161 @@ def train_stage2_boost_model_generator(residual_data_key: str, config: Dict[str,
         yield error_msg
 
 
+def create_ensemble_visualization(ensemble_info: Dict[str, Any]):
+    """
+    为综合模型创建可视化图表
+
+    包含：
+    1. 所有信号的R²对比柱状图
+    2. Delta R²分布图
+    3. 选择信号的饼图
+    4. 预测效果对比（随机选择几个信号）
+    """
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib
+        matplotlib.use('Agg')
+
+        signal_analysis = ensemble_info['signal_analysis']
+        target_signals = ensemble_info['signals']['target']
+
+        # 创建2x2子图
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle(f'综合模型分析 - {ensemble_info["name"]}', fontsize=16, fontweight='bold')
+
+        # 图1: R²对比柱状图
+        ax = axes[0, 0]
+        signals = [item['signal'] for item in signal_analysis]
+        r2_stage1 = [item['r2_stage1'] for item in signal_analysis]
+        r2_ensemble = [item['r2_ensemble'] for item in signal_analysis]
+
+        x = np.arange(len(signals))
+        width = 0.35
+
+        ax.bar(x - width/2, r2_stage1, width, label='Stage1', alpha=0.8, color='skyblue')
+        ax.bar(x + width/2, r2_ensemble, width, label='Ensemble', alpha=0.8, color='orange')
+
+        ax.set_xlabel('信号', fontsize=10)
+        ax.set_ylabel('R² 分数', fontsize=10)
+        ax.set_title('所有信号的R²对比', fontsize=12, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(signals, rotation=45, ha='right', fontsize=8)
+        ax.legend()
+        ax.grid(axis='y', alpha=0.3)
+        ax.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+
+        # 图2: Delta R²分布图
+        ax = axes[0, 1]
+        delta_r2_values = [item['delta_r2'] for item in signal_analysis]
+        colors = ['green' if item['use_stage2'] else 'gray' for item in signal_analysis]
+
+        bars = ax.barh(signals, delta_r2_values, color=colors, alpha=0.7)
+        ax.axvline(x=ensemble_info['delta_r2_threshold'], color='red', linestyle='--',
+                   linewidth=2, label=f'阈值 ({ensemble_info["delta_r2_threshold"]:.3f})')
+        ax.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
+
+        ax.set_xlabel('Delta R² (Ensemble - Stage1)', fontsize=10)
+        ax.set_ylabel('信号', fontsize=10)
+        ax.set_title('Delta R²分布 (绿色=使用Stage2, 灰色=仅Stage1)', fontsize=12, fontweight='bold')
+        ax.legend()
+        ax.grid(axis='x', alpha=0.3)
+
+        # 图3: 选择策略饼图
+        ax = axes[1, 0]
+        num_use_stage2 = ensemble_info['num_use_stage2']
+        num_use_stage1 = ensemble_info['num_use_stage1_only']
+
+        sizes = [num_use_stage2, num_use_stage1]
+        labels = [f'Stage1+Stage2\n({num_use_stage2}个)', f'仅Stage1\n({num_use_stage1}个)']
+        colors_pie = ['#ff9999', '#66b3ff']
+        explode = (0.05, 0)
+
+        ax.pie(sizes, explode=explode, labels=labels, colors=colors_pie, autopct='%1.1f%%',
+               shadow=True, startangle=90, textprops={'fontsize': 11})
+        ax.set_title('信号选择策略分布', fontsize=12, fontweight='bold')
+
+        # 图4: 整体性能对比
+        ax = axes[1, 1]
+        metrics = ensemble_info['metrics']
+
+        categories = ['MAE', 'RMSE', 'R²']
+        stage1_values = [metrics['stage1']['mae'], metrics['stage1']['rmse'], metrics['stage1']['r2']]
+        ensemble_values = [metrics['ensemble']['mae'], metrics['ensemble']['rmse'], metrics['ensemble']['r2']]
+
+        # 归一化显示（R²本身就是0-1，MAE和RMSE需要归一化）
+        max_mae_rmse = max(max(stage1_values[:2]), max(ensemble_values[:2]))
+        stage1_normalized = [stage1_values[0]/max_mae_rmse, stage1_values[1]/max_mae_rmse, stage1_values[2]]
+        ensemble_normalized = [ensemble_values[0]/max_mae_rmse, ensemble_values[1]/max_mae_rmse, ensemble_values[2]]
+
+        x = np.arange(len(categories))
+        width = 0.35
+
+        bars1 = ax.bar(x - width/2, stage1_normalized, width, label='Stage1', alpha=0.8, color='skyblue')
+        bars2 = ax.bar(x + width/2, ensemble_normalized, width, label='Ensemble', alpha=0.8, color='orange')
+
+        ax.set_ylabel('归一化值', fontsize=10)
+        ax.set_title('整体性能对比 (测试集)', fontsize=12, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(categories)
+        ax.legend()
+        ax.grid(axis='y', alpha=0.3)
+
+        # 添加实际值标注
+        for i, (bar1, bar2) in enumerate(zip(bars1, bars2)):
+            height1 = bar1.get_height()
+            height2 = bar2.get_height()
+            ax.text(bar1.get_x() + bar1.get_width()/2., height1,
+                   f'{stage1_values[i]:.4f}',
+                   ha='center', va='bottom', fontsize=8)
+            ax.text(bar2.get_x() + bar2.get_width()/2., height2,
+                   f'{ensemble_values[i]:.4f}',
+                   ha='center', va='bottom', fontsize=8)
+
+        plt.tight_layout()
+        return fig
+
+    except Exception as e:
+        print(f"⚠️ 可视化生成失败: {e}")
+        traceback.print_exc()
+        return None
+
+
 def compute_signal_r2_and_select_threshold(
         base_model_name: str,
         stage2_model_name: str,
-        r2_threshold: float = 0.4
-) -> Tuple[str, Dict[str, Any]]:
+        delta_r2_threshold: float = 0.05
+) -> Tuple[str, Dict[str, Any], Any]:
     """
-    Compute R² score for each signal, intelligently select R² threshold, generate ensemble inference model
+    使用Delta R²策略生成综合推理模型 (仅在测试集上评估)
+
+    新逻辑：
+    1. 使用Stage2训练的测试集数据
+    2. 计算每个信号的 Delta R² = R²_ensemble - R²_stage1
+    3. 如果 Delta R² > 阈值，说明Stage2有显著提升，使用Stage1+Stage2
+    4. 否则只使用Stage1预测
 
     Args:
-        base_model_name: 基础SSTModel name
-        stage2_model_name: Stage2残差Model name
-        r2_threshold: R² threshold (apply Stage2 only to signals with R² < threshold)
+        base_model_name: 基础SST模型名称
+        stage2_model_name: Stage2残差模型名称
+        delta_r2_threshold: Delta R²阈值 (默认0.05，即5%提升)
 
     Returns:
-        status_msg: Status message
-        ensemble_info: Ensemble model info
+        status_msg: 状态信息
+        ensemble_info: 综合模型信息
+        fig: 可视化图表
     """
     try:
         log_msg = []
         log_msg.append("=" * 80)
-        log_msg.append("🎯 计算信号R²分数并生成综合推理模型")
+        log_msg.append("🎯 生成综合推理模型 (Delta R² 策略)")
         log_msg.append("=" * 80)
 
         # Check if models exist
         if base_model_name not in global_state['trained_models']:
-            return f"❌ 基础模型 {base_model_name} 不存在！", {}
+            return f"❌ 基础模型 {base_model_name} 不存在！", {}, None
 
         if stage2_model_name not in global_state['stage2_models']:
-            return f"❌ Stage2模型 {stage2_model_name} 不存在！", {}
+            return f"❌ Stage2模型 {stage2_model_name} 不存在！", {}, None
 
         # Get models
         base_model_info = global_state['trained_models'][base_model_name]
@@ -1334,11 +1460,12 @@ def compute_signal_r2_and_select_threshold(
 
         base_model = base_model_info['model']
         stage2_model = stage2_model_info['model']
+        stage2_config = stage2_model_info['config']
 
         # Get residual data
         residual_data_key = stage2_model_info['residual_data_key']
         if residual_data_key not in global_state['residual_data']:
-            return f"❌ 残差数据 {residual_data_key} 不存在！", {}
+            return f"❌ 残差数据 {residual_data_key} 不存在！", {}, None
 
         residuals_df = global_state['residual_data'][residual_data_key]['data']
         residual_info = global_state['residual_data'][residual_data_key]['info']
@@ -1346,23 +1473,39 @@ def compute_signal_r2_and_select_threshold(
         boundary_signals = residual_info['boundary_signals']
         target_signals = residual_info['target_signals']
 
-        log_msg.append(f"\n📊 数据信息:")
+        log_msg.append(f"\n📊 模型信息:")
         log_msg.append(f"  基础模型: {base_model_name}")
         log_msg.append(f"  Stage2模型: {stage2_model_name}")
         log_msg.append(f"  目标信号数: {len(target_signals)}")
+        log_msg.append(f"  Delta R²阈值: {delta_r2_threshold:.3f} ({delta_r2_threshold*100:.1f}%)")
 
-        # Get true values and predictions
+        # 使用Stage2训练时相同的数据分割获取测试集
+        test_size = stage2_config.get('test_size', 0.2)
+        val_size = stage2_config.get('val_size', 0.1)
+
+        total_size = len(residuals_df)
+        train_size = int(total_size * (1 - test_size - val_size))
+        val_size_actual = int(total_size * val_size)
+        test_start_idx = train_size + val_size_actual
+
+        log_msg.append(f"\n🔀 数据分割 (使用测试集评估):")
+        log_msg.append(f"  总数据: {total_size}")
+        log_msg.append(f"  训练集: {train_size} ({train_size/total_size*100:.1f}%)")
+        log_msg.append(f"  验证集: {val_size_actual} ({val_size_actual/total_size*100:.1f}%)")
+        log_msg.append(f"  测试集: {total_size - test_start_idx} ({(total_size - test_start_idx)/total_size*100:.1f}%)")
+
+        # 提取测试集数据
         y_true_cols = [f"{sig}_true" for sig in target_signals]
         y_pred_cols = [f"{sig}_pred" for sig in target_signals]
 
-        y_true = residuals_df[y_true_cols].values
-        y_pred_base = residuals_df[y_pred_cols].values
+        y_true_test = residuals_df[y_true_cols].iloc[test_start_idx:].values
+        y_pred_stage1_test = residuals_df[y_pred_cols].iloc[test_start_idx:].values
+        X_test = residuals_df[boundary_signals].iloc[test_start_idx:].values
 
-        # Stage2 residual prediction using batch inference
-        X = residuals_df[boundary_signals].values
-        y_residual_pred = batch_inference(
+        # 使用Stage2模型预测测试集残差
+        y_residual_pred_test = batch_inference(
             stage2_model,
-            X,
+            X_test,
             global_state['stage2_scalers'][stage2_model_name]['X'],
             global_state['stage2_scalers'][stage2_model_name]['y'],
             device,
@@ -1370,124 +1513,189 @@ def compute_signal_r2_and_select_threshold(
             model_name="Stage2"
         )
 
-        # Compute R² for each signal using safe computation
-        signal_r2_scores = []
-        _, per_signal_r2 = compute_r2_safe(y_true, y_pred_base, method='per_output_mean')
+        # 计算每个信号的R²分数
+        signal_analysis = []
 
         for i, signal in enumerate(target_signals):
-            r2 = per_signal_r2[i]
-            signal_r2_scores.append({
+            y_true_sig = y_true_test[:, i]
+            y_pred_stage1_sig = y_pred_stage1_test[:, i]
+            y_pred_ensemble_sig = y_pred_stage1_sig + y_residual_pred_test[:, i]
+
+            # 计算Stage1的R²
+            r2_stage1, _ = compute_r2_safe(
+                y_true_sig.reshape(-1, 1),
+                y_pred_stage1_sig.reshape(-1, 1),
+                method='per_output_mean'
+            )
+
+            # 计算Ensemble的R²
+            r2_ensemble, _ = compute_r2_safe(
+                y_true_sig.reshape(-1, 1),
+                y_pred_ensemble_sig.reshape(-1, 1),
+                method='per_output_mean'
+            )
+
+            # 计算Delta R²
+            delta_r2 = r2_ensemble - r2_stage1
+
+            # 判断是否使用Stage2
+            use_stage2 = delta_r2 > delta_r2_threshold
+
+            signal_analysis.append({
                 'signal': signal,
-                'r2': r2,
-                'apply_stage2': r2 < r2_threshold
+                'r2_stage1': float(r2_stage1),
+                'r2_ensemble': float(r2_ensemble),
+                'delta_r2': float(delta_r2),
+                'use_stage2': bool(use_stage2)
             })
 
-        log_msg.append(f"\n🎯 信号R²分析 (阈值: {r2_threshold}):")
-        log_msg.append(f"{'信号名称':<30} {'R²分数':>10} {'应用Stage2':>12}")
-        log_msg.append("-" * 55)
+        # 统计使用Stage2的信号数
+        num_use_stage2 = sum(1 for item in signal_analysis if item['use_stage2'])
+        num_use_stage1_only = len(target_signals) - num_use_stage2
 
-        num_signals_use_stage2 = 0
-        for item in signal_r2_scores:
+        log_msg.append(f"\n🎯 信号Delta R²分析:")
+        log_msg.append(f"{'信号名称':<30} {'Stage1 R²':>12} {'Ensemble R²':>12} {'Delta R²':>12} {'选择':>10}")
+        log_msg.append("-" * 80)
+
+        for item in signal_analysis:
+            choice = "Stage1+2" if item['use_stage2'] else "Stage1"
             log_msg.append(
-                f"{item['signal']:<30} {item['r2']:>10.4f} {'✓' if item['apply_stage2'] else '✗':>12}"
+                f"{item['signal']:<30} {item['r2_stage1']:>12.4f} {item['r2_ensemble']:>12.4f} "
+                f"{item['delta_r2']:>12.4f} {choice:>10}"
             )
-            if item['apply_stage2']:
-                num_signals_use_stage2 += 1
 
-        log_msg.append("-" * 55)
-        log_msg.append(f"需要Stage2的信号数: {num_signals_use_stage2} / {len(target_signals)}")
+        log_msg.append("-" * 80)
+        log_msg.append(f"使用Stage1+Stage2: {num_use_stage2} 个信号")
+        log_msg.append(f"仅使用Stage1: {num_use_stage1_only} 个信号")
 
-        # Generate ensemble prediction (selectively apply Stage2)
-        y_ensemble = y_pred_base.copy()
-        for i, item in enumerate(signal_r2_scores):
-            if item['apply_stage2']:
-                # Apply Stage2 correction
-                y_ensemble[:, i] = y_pred_base[:, i] + y_residual_pred[:, i]
+        # 生成最终综合预测（在测试集上）
+        y_ensemble_test = y_pred_stage1_test.copy()
+        for i, item in enumerate(signal_analysis):
+            if item['use_stage2']:
+                y_ensemble_test[:, i] = y_pred_stage1_test[:, i] + y_residual_pred_test[:, i]
 
-        # Compute ensemble model performance using safe R² computation
-        mae_base = mean_absolute_error(y_true, y_pred_base)
-        mae_ensemble = mean_absolute_error(y_true, y_ensemble)
-        rmse_base = np.sqrt(mean_squared_error(y_true, y_pred_base))
-        rmse_ensemble = np.sqrt(mean_squared_error(y_true, y_ensemble))
-        r2_base, _ = compute_r2_safe(y_true, y_pred_base, method='per_output_mean')
-        r2_ensemble, _ = compute_r2_safe(y_true, y_ensemble, method='per_output_mean')
+        # 计算整体性能
+        mae_stage1 = mean_absolute_error(y_true_test, y_pred_stage1_test)
+        mae_ensemble = mean_absolute_error(y_true_test, y_ensemble_test)
+        rmse_stage1 = np.sqrt(mean_squared_error(y_true_test, y_pred_stage1_test))
+        rmse_ensemble = np.sqrt(mean_squared_error(y_true_test, y_ensemble_test))
+        r2_stage1, _ = compute_r2_safe(y_true_test, y_pred_stage1_test, method='per_output_mean')
+        r2_ensemble, _ = compute_r2_safe(y_true_test, y_ensemble_test, method='per_output_mean')
 
-        improvement_mae = (mae_base - mae_ensemble) / mae_base * 100
-        improvement_rmse = (rmse_base - rmse_ensemble) / rmse_base * 100
-        improvement_r2 = (r2_ensemble - r2_base) / (1 - r2_base) * 100
+        improvement_mae = (mae_stage1 - mae_ensemble) / mae_stage1 * 100 if mae_stage1 > 0 else 0
+        improvement_rmse = (rmse_stage1 - rmse_ensemble) / rmse_stage1 * 100 if rmse_stage1 > 0 else 0
+        improvement_r2 = (r2_ensemble - r2_stage1) / (1 - r2_stage1) * 100 if r2_stage1 < 1 else 0
 
-        log_msg.append(f"\n📈 性能对比:")
-        log_msg.append(f"{'指标':<15} {'基础模型(SST)':>18} {'综合模型':>18} {'改进':>15}")
-        log_msg.append("-" * 70)
-        log_msg.append(f"{'MAE':<15} {mae_base:>18.6f} {mae_ensemble:>18.6f} {improvement_mae:>14.2f}%")
-        log_msg.append(f"{'RMSE':<15} {rmse_base:>18.6f} {rmse_ensemble:>18.6f} {improvement_rmse:>14.2f}%")
-        log_msg.append(f"{'R²':<15} {r2_base:>18.4f} {r2_ensemble:>18.4f} {improvement_r2:>14.2f}%")
+        log_msg.append(f"\n📈 整体性能对比 (测试集):")
+        log_msg.append(f"{'指标':<15} {'Stage1':>15} {'Ensemble':>15} {'改进':>15}")
+        log_msg.append("-" * 65)
+        log_msg.append(f"{'MAE':<15} {mae_stage1:>15.6f} {mae_ensemble:>15.6f} {improvement_mae:>14.2f}%")
+        log_msg.append(f"{'RMSE':<15} {rmse_stage1:>15.6f} {rmse_ensemble:>15.6f} {improvement_rmse:>14.2f}%")
+        log_msg.append(f"{'R²':<15} {r2_stage1:>15.4f} {r2_ensemble:>15.4f} {improvement_r2:>14.2f}%")
 
-        # 保存Ensemble model info
+        # 保存综合模型信息
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        ensemble_name = f"Ensemble_{base_model_name}_{stage2_model_name}_{timestamp}"
+        ensemble_name = f"Ensemble_{base_model_name}_{timestamp}"
 
         ensemble_info = {
             'name': ensemble_name,
             'base_model_name': base_model_name,
             'stage2_model_name': stage2_model_name,
-            'r2_threshold': r2_threshold,
-            'signal_r2_scores': signal_r2_scores,
-            'num_signals_use_stage2': num_signals_use_stage2,
+            'delta_r2_threshold': float(delta_r2_threshold),
+            'signal_analysis': signal_analysis,
+            'num_use_stage2': int(num_use_stage2),
+            'num_use_stage1_only': int(num_use_stage1_only),
             'metrics': {
-                'base': {'mae': mae_base, 'rmse': rmse_base, 'r2': r2_base},
-                'ensemble': {'mae': mae_ensemble, 'rmse': rmse_ensemble, 'r2': r2_ensemble},
+                'stage1': {
+                    'mae': float(mae_stage1),
+                    'rmse': float(rmse_stage1),
+                    'r2': float(r2_stage1)
+                },
+                'ensemble': {
+                    'mae': float(mae_ensemble),
+                    'rmse': float(rmse_ensemble),
+                    'r2': float(r2_ensemble)
+                },
                 'improvement': {
-                    'mae_pct': improvement_mae,
-                    'rmse_pct': improvement_rmse,
-                    'r2_pct': improvement_r2
+                    'mae_pct': float(improvement_mae),
+                    'rmse_pct': float(improvement_rmse),
+                    'r2_pct': float(improvement_r2)
                 }
             },
             'predictions': {
-                'y_true': y_true,
-                'y_pred_base': y_pred_base,
-                'y_pred_ensemble': y_ensemble,
-                'y_residual_pred': y_residual_pred
+                'y_true': y_true_test,
+                'y_pred_stage1': y_pred_stage1_test,
+                'y_pred_ensemble': y_ensemble_test,
+                'y_residual_pred': y_residual_pred_test
             },
             'signals': {
                 'boundary': boundary_signals,
                 'target': target_signals
+            },
+            'data_split': {
+                'test_size': float(test_size),
+                'val_size': float(val_size),
+                'test_start_idx': int(test_start_idx),
+                'test_samples': int(len(y_true_test))
             },
             'created_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
 
         global_state['ensemble_models'][ensemble_name] = ensemble_info
 
-        # Save ensemble model config
+        # 保存配置文件
         ensemble_dir = "saved_models/ensemble"
         os.makedirs(ensemble_dir, exist_ok=True)
 
         config_path = os.path.join(ensemble_dir, f"{ensemble_name}_config.json")
         with open(config_path, 'w', encoding='utf-8') as f:
-            # Save config (excluding large arrays)
+            # 保存配置（排除大数组，确保所有类型可JSON序列化）
             save_config = {
                 'name': ensemble_name,
                 'base_model_name': base_model_name,
                 'stage2_model_name': stage2_model_name,
-                'r2_threshold': r2_threshold,
-                'signal_r2_scores': signal_r2_scores,
-                'num_signals_use_stage2': num_signals_use_stage2,
-                'metrics': ensemble_info['metrics'],
+                'delta_r2_threshold': float(delta_r2_threshold),
+                'signal_analysis': signal_analysis,  # 已转换为Python原生类型
+                'num_use_stage2': int(num_use_stage2),
+                'num_use_stage1_only': int(num_use_stage1_only),
+                'metrics': ensemble_info['metrics'],  # 已转换
                 'signals': ensemble_info['signals'],
+                'data_split': ensemble_info['data_split'],
                 'created_time': ensemble_info['created_time']
             }
             json.dump(save_config, f, indent=2, ensure_ascii=False)
 
+        # 生成汇总CSV文件
+        csv_path = os.path.join(ensemble_dir, f"{ensemble_name}_summary.csv")
+        summary_data = []
+        for item in signal_analysis:
+            summary_data.append({
+                '信号名称': item['signal'],
+                'Stage1_R2': item['r2_stage1'],
+                'Ensemble_R2': item['r2_ensemble'],
+                'Delta_R2': item['delta_r2'],
+                'R2提升(%)': item['delta_r2'] * 100,
+                '选择模型': 'Stage1+Stage2' if item['use_stage2'] else 'Stage1',
+                '是否使用Stage2': 'Yes' if item['use_stage2'] else 'No'
+            })
+
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+
         log_msg.append(f"\n✅ 综合推理模型已生成:")
         log_msg.append(f"  模型名称: {ensemble_name}")
         log_msg.append(f"  配置路径: {config_path}")
+        log_msg.append(f"  汇总CSV: {csv_path}")
 
-        return "\n".join(log_msg), ensemble_info
+        # 生成可视化图表
+        fig = create_ensemble_visualization(ensemble_info)
+
+        return "\n".join(log_msg), ensemble_info, fig
 
     except Exception as e:
         error_msg = f"❌ 综合模型生成失败:\n{str(e)}\n\n{traceback.format_exc()}"
         print(error_msg)
-        return error_msg, {}
+        return error_msg, {}, None
 
 
 # ============================================================================
@@ -2979,8 +3187,14 @@ def create_unified_interface():
 
             # Tab 5: 综合推理模型生成
             with gr.Tab("🎯 综合推理模型", elem_id="ensemble_model"):
-                gr.Markdown("## 生成综合推理模型")
-                gr.Markdown("智能选择R²阈值，组合SST模型和Stage2模型生成综合预测")
+                gr.Markdown("## 生成综合推理模型 (Delta R² 策略)")
+                gr.Markdown("""
+                **优化后的策略**：
+                - 使用测试集数据评估每个信号的Delta R² = R²_ensemble - R²_stage1
+                - 只对Delta R² > 阈值的信号应用Stage2修正（说明Stage2确实能提升性能）
+                - 其余信号仅使用Stage1预测
+                - 自动生成所有信号的分析报告和CSV汇总文件
+                """)
 
                 with gr.Row():
                     with gr.Column(scale=1):
@@ -2995,11 +3209,11 @@ def create_unified_interface():
                         )
                         refresh_ensemble_btn = gr.Button("🔄 刷新", size="sm")
 
-                        gr.Markdown("### 🎚️ R²阈值设置")
-                        r2_threshold_slider = gr.Slider(
-                            0.0, 1.0, 0.4, 0.05,
-                            label="R²阈值",
-                            info="只对R² < 阈值的信号应用Stage2修正"
+                        gr.Markdown("### 🎚️ Delta R²阈值设置")
+                        delta_r2_threshold_slider = gr.Slider(
+                            0.0, 0.5, 0.05, 0.01,
+                            label="Delta R²阈值",
+                            info="只对Delta R² > 阈值的信号应用Stage2修正（0.05 = 5%提升）"
                         )
 
                         generate_ensemble_btn = gr.Button("🎯 生成综合模型", variant="primary", size="lg")
@@ -3012,14 +3226,21 @@ def create_unified_interface():
                             interactive=False
                         )
 
-                def generate_ensemble_ui(base_model_name, stage2_model_name, r2_threshold):
-                    if not base_model_name or not stage2_model_name:
-                        return "❌ 请选择基础模型和Stage2模型！"
-
-                    status_msg, ensemble_info = compute_signal_r2_and_select_threshold(
-                        base_model_name, stage2_model_name, r2_threshold
+                # 添加可视化输出
+                with gr.Row():
+                    ensemble_visualization = gr.Plot(
+                        label="综合模型分析可视化",
+                        show_label=True
                     )
-                    return status_msg
+
+                def generate_ensemble_ui(base_model_name, stage2_model_name, delta_r2_threshold):
+                    if not base_model_name or not stage2_model_name:
+                        return "❌ 请选择基础模型和Stage2模型！", None
+
+                    status_msg, ensemble_info, fig = compute_signal_r2_and_select_threshold(
+                        base_model_name, stage2_model_name, delta_r2_threshold
+                    )
+                    return status_msg, fig
 
                 refresh_ensemble_btn.click(
                     fn=lambda: (gr.update(choices=get_available_models()),
@@ -3029,8 +3250,8 @@ def create_unified_interface():
 
                 generate_ensemble_btn.click(
                     fn=generate_ensemble_ui,
-                    inputs=[base_model_selector, stage2_model_selector, r2_threshold_slider],
-                    outputs=[ensemble_status]
+                    inputs=[base_model_selector, stage2_model_selector, delta_r2_threshold_slider],
+                    outputs=[ensemble_status, ensemble_visualization]
                 )
 
             # Tab 6: 二次推理比较
