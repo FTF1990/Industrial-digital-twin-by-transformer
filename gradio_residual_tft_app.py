@@ -1360,11 +1360,8 @@ def create_ensemble_visualization(ensemble_info: Dict[str, Any]):
     """
     Create visualization charts for ensemble model
 
-    Contains:
-    1. R² comparison bar chart for all signals
-    2. Delta R² distribution chart
-    3. Signal selection pie chart
-    4. Overall performance comparison
+    Shows ALL output signals with individual prediction vs actual comparison
+    and R² scores for each signal
     """
     try:
         import matplotlib.pyplot as plt
@@ -1377,140 +1374,83 @@ def create_ensemble_visualization(ensemble_info: Dict[str, Any]):
         target_signals = ensemble_info['signals']['target']
         num_signals = len(signal_analysis)
 
-        # Determine grid layout based on number of signals
-        # Top row: R² comparison and Delta R² distribution
-        # Bottom rows: Performance comparison + individual signal plots
-        n_signal_plots = min(6, num_signals)  # Show up to 6 individual signals
-        fig = plt.figure(figsize=(20, 14))
-
-        # Create grid: 3 rows, with top 2 rows split differently
-        gs = fig.add_gridspec(4, 4, hspace=0.3, wspace=0.3)
-
-        fig.suptitle(f'Ensemble Model Analysis - {ensemble_info["name"]}',
-                     fontsize=16, fontweight='bold')
-
-        # Plot 1: R² comparison bar chart (top left, spans 2 columns)
-        ax1 = fig.add_subplot(gs[0, :2])
         signals = [item['signal'] for item in signal_analysis]
         r2_stage1 = [item['r2_stage1'] for item in signal_analysis]
         r2_ensemble = [item['r2_ensemble'] for item in signal_analysis]
 
+        # Get prediction data
+        predictions = ensemble_info.get('predictions', {})
+        y_true = predictions.get('y_true')
+        y_pred_base = predictions.get('y_pred_base')
+        y_pred_ensemble = predictions.get('y_pred_ensemble')
+
+        # Calculate layout: 1 summary row + rows for all individual signals (4 signals per row)
+        signals_per_row = 4
+        num_signal_rows = (num_signals + signals_per_row - 1) // signals_per_row
+        total_rows = 1 + num_signal_rows
+
+        # Create figure with dynamic height
+        fig_height = 5 + num_signal_rows * 4
+        fig = plt.figure(figsize=(24, fig_height))
+
+        gs = fig.add_gridspec(total_rows, signals_per_row, hspace=0.35, wspace=0.3)
+
+        fig.suptitle(f'Ensemble Model Analysis - {ensemble_info["name"]} (All {num_signals} Signals)',
+                     fontsize=16, fontweight='bold', y=0.995)
+
+        # Row 0: Overall R² comparison for all signals
+        ax_summary = fig.add_subplot(gs[0, :])
         x = np.arange(len(signals))
         width = 0.35
 
-        ax1.bar(x - width/2, r2_stage1, width, label='Stage1', alpha=0.8, color='skyblue')
-        ax1.bar(x + width/2, r2_ensemble, width, label='Ensemble', alpha=0.8, color='orange')
+        bars1 = ax_summary.bar(x - width/2, r2_stage1, width, label='Stage1', alpha=0.8, color='skyblue')
+        bars2 = ax_summary.bar(x + width/2, r2_ensemble, width, label='Ensemble', alpha=0.8, color='orange')
 
-        ax1.set_xlabel('Signals', fontsize=10)
-        ax1.set_ylabel('R² Score', fontsize=10)
-        ax1.set_title('R² Comparison for All Signals', fontsize=12, fontweight='bold')
-        ax1.set_xticks(x)
-        ax1.set_xticklabels(signals, rotation=45, ha='right', fontsize=8)
-        ax1.legend()
-        ax1.grid(axis='y', alpha=0.3)
-        ax1.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+        ax_summary.set_xlabel('Signals', fontsize=11)
+        ax_summary.set_ylabel('R² Score', fontsize=11)
+        ax_summary.set_title('R² Comparison for All Signals', fontsize=13, fontweight='bold')
+        ax_summary.set_xticks(x)
+        ax_summary.set_xticklabels(signals, rotation=45, ha='right', fontsize=9)
+        ax_summary.legend(fontsize=10)
+        ax_summary.grid(axis='y', alpha=0.3)
+        ax_summary.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
 
-        # Plot 2: Delta R² distribution (top right, spans 2 columns)
-        ax2 = fig.add_subplot(gs[0, 2:])
-        delta_r2_values = [item['delta_r2'] for item in signal_analysis]
-        colors = ['green' if item['use_stage2'] else 'gray' for item in signal_analysis]
-
-        bars = ax2.barh(signals, delta_r2_values, color=colors, alpha=0.7)
-        ax2.axvline(x=ensemble_info['delta_r2_threshold'], color='red', linestyle='--',
-                   linewidth=2, label=f'Threshold ({ensemble_info["delta_r2_threshold"]:.3f})')
-        ax2.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
-
-        ax2.set_xlabel('Delta R² (Ensemble - Stage1)', fontsize=10)
-        ax2.set_ylabel('Signals', fontsize=10)
-        ax2.set_title('Delta R² Distribution (Green=Use Stage2, Gray=Stage1 Only)',
-                     fontsize=12, fontweight='bold')
-        ax2.legend()
-        ax2.grid(axis='x', alpha=0.3)
-
-        # Plot 3: Selection strategy pie chart (middle left)
-        ax3 = fig.add_subplot(gs[1, :2])
-        num_use_stage2 = ensemble_info['num_use_stage2']
-        num_use_stage1 = ensemble_info['num_use_stage1_only']
-
-        sizes = [num_use_stage2, num_use_stage1]
-        labels = [f'Stage1+Stage2\n({num_use_stage2} signals)',
-                 f'Stage1 Only\n({num_use_stage1} signals)']
-        colors_pie = ['#ff9999', '#66b3ff']
-        explode = (0.05, 0)
-
-        ax3.pie(sizes, explode=explode, labels=labels, colors=colors_pie, autopct='%1.1f%%',
-               shadow=True, startangle=90, textprops={'fontsize': 11})
-        ax3.set_title('Signal Selection Strategy Distribution', fontsize=12, fontweight='bold')
-
-        # Plot 4: Overall performance comparison (middle right)
-        ax4 = fig.add_subplot(gs[1, 2:])
-        metrics = ensemble_info['metrics']
-
-        categories = ['MAE', 'RMSE', 'R²']
-        stage1_values = [metrics['stage1']['mae'], metrics['stage1']['rmse'], metrics['stage1']['r2']]
-        ensemble_values = [metrics['ensemble']['mae'], metrics['ensemble']['rmse'], metrics['ensemble']['r2']]
-
-        # Normalize for display (R² is 0-1, MAE and RMSE need normalization)
-        max_mae_rmse = max(max(stage1_values[:2]), max(ensemble_values[:2])) if max(stage1_values[:2]) > 0 else 1
-        stage1_normalized = [stage1_values[0]/max_mae_rmse, stage1_values[1]/max_mae_rmse, stage1_values[2]]
-        ensemble_normalized = [ensemble_values[0]/max_mae_rmse, ensemble_values[1]/max_mae_rmse, ensemble_values[2]]
-
-        x_pos = np.arange(len(categories))
-        width = 0.35
-
-        bars1 = ax4.bar(x_pos - width/2, stage1_normalized, width, label='Stage1', alpha=0.8, color='skyblue')
-        bars2 = ax4.bar(x_pos + width/2, ensemble_normalized, width, label='Ensemble', alpha=0.8, color='orange')
-
-        ax4.set_ylabel('Normalized Value', fontsize=10)
-        ax4.set_title('Overall Performance Comparison (Test Set)', fontsize=12, fontweight='bold')
-        ax4.set_xticks(x_pos)
-        ax4.set_xticklabels(categories)
-        ax4.legend()
-        ax4.grid(axis='y', alpha=0.3)
-
-        # Add actual value annotations
-        for i, (bar1, bar2) in enumerate(zip(bars1, bars2)):
+        # Add R² value annotations on bars
+        for idx, (bar1, bar2) in enumerate(zip(bars1, bars2)):
             height1 = bar1.get_height()
             height2 = bar2.get_height()
-            ax4.text(bar1.get_x() + bar1.get_width()/2., height1,
-                   f'{stage1_values[i]:.4f}',
-                   ha='center', va='bottom', fontsize=8)
-            ax4.text(bar2.get_x() + bar2.get_width()/2., height2,
-                   f'{ensemble_values[i]:.4f}',
-                   ha='center', va='bottom', fontsize=8)
+            ax_summary.text(bar1.get_x() + bar1.get_width()/2., height1,
+                          f'{r2_stage1[idx]:.3f}',
+                          ha='center', va='bottom', fontsize=7, rotation=0)
+            ax_summary.text(bar2.get_x() + bar2.get_width()/2., height2,
+                          f'{r2_ensemble[idx]:.3f}',
+                          ha='center', va='bottom', fontsize=7, rotation=0)
 
-        # Plot 5-10: Individual signal predictions (bottom two rows, up to 6 signals)
-        predictions = ensemble_info.get('predictions', {})
-        if predictions:
-            y_true = predictions.get('y_true')
-            y_pred_base = predictions.get('y_pred_base')
-            y_pred_ensemble = predictions.get('y_pred_ensemble')
+        # Rows 1+: Individual signal prediction plots (ALL signals)
+        if y_true is not None and y_pred_base is not None and y_pred_ensemble is not None:
+            plot_samples = min(300, len(y_true))
 
-            if y_true is not None and y_pred_base is not None and y_pred_ensemble is not None:
-                plot_samples = min(200, len(y_true))
+            for idx in range(num_signals):
+                row = 1 + idx // signals_per_row
+                col = idx % signals_per_row
 
-                for idx in range(n_signal_plots):
-                    if idx >= num_signals:
-                        break
+                ax = fig.add_subplot(gs[row, col])
 
-                    row = 2 + idx // 3  # Start from row 2
-                    col = (idx % 3)
-                    if col < 2:
-                        ax = fig.add_subplot(gs[row, col*2:(col+1)*2])
-                    else:
-                        ax = fig.add_subplot(gs[row, 2:])
+                signal_name = signals[idx] if idx < len(signals) else f'Signal {idx+1}'
 
-                    signal_name = signals[idx] if idx < len(signals) else f'Signal {idx+1}'
+                # Plot predictions vs true values
+                ax.plot(y_true[:plot_samples, idx], label='True', alpha=0.8, linewidth=1.5, color='green')
+                ax.plot(y_pred_base[:plot_samples, idx], label='Stage1', alpha=0.7, linewidth=1.2, color='skyblue')
+                ax.plot(y_pred_ensemble[:plot_samples, idx], label='Ensemble', alpha=0.7, linewidth=1.2, color='orange')
 
-                    ax.plot(y_true[:plot_samples, idx], label='True', alpha=0.7, linewidth=1.5)
-                    ax.plot(y_pred_base[:plot_samples, idx], label='Base', alpha=0.7, linewidth=1.5)
-                    ax.plot(y_pred_ensemble[:plot_samples, idx], label='Ensemble', alpha=0.7, linewidth=1.5)
-
-                    ax.set_title(f'{signal_name}', fontsize=10, fontweight='bold')
-                    ax.legend(fontsize=8)
-                    ax.set_xlabel('Sample Index', fontsize=8)
-                    ax.set_ylabel('Value', fontsize=8)
-                    ax.grid(alpha=0.3)
+                # Add R² scores in title
+                ax.set_title(f'{signal_name}\nStage1 R²={r2_stage1[idx]:.4f}, Ensemble R²={r2_ensemble[idx]:.4f}',
+                           fontsize=9, fontweight='bold')
+                ax.legend(fontsize=7, loc='best')
+                ax.set_xlabel('Sample Index', fontsize=8)
+                ax.set_ylabel('Value', fontsize=8)
+                ax.grid(alpha=0.3)
+                ax.tick_params(labelsize=7)
 
         plt.tight_layout()
         return fig
@@ -3805,6 +3745,10 @@ def create_unified_interface():
                         reinf_plot = gr.Plot(label="性能对比可视化")
 
                 def compare_reinference_ui(ensemble_name, start_idx, end_idx):
+                    """
+                    Compare reinference results with visualization of ALL signals
+                    and export CSV with predictions, actual values, and R² scores
+                    """
                     if not ensemble_name:
                         return "❌ 请选择综合模型！", None
 
@@ -3819,6 +3763,12 @@ def create_unified_interface():
                         y_pred_base = ensemble_info['predictions']['y_pred_base']
                         y_pred_ensemble = ensemble_info['predictions']['y_pred_ensemble']
 
+                        # Get signal names
+                        signal_names = ensemble_info.get('signals', {}).get('target', [])
+                        num_signals = y_true.shape[1]
+                        if not signal_names or len(signal_names) != num_signals:
+                            signal_names = [f'Signal_{i+1}' for i in range(num_signals)]
+
                         # 切片
                         start_idx = max(0, int(start_idx))
                         end_idx = min(len(y_true), int(end_idx))
@@ -3827,108 +3777,158 @@ def create_unified_interface():
                         y_pred_base_seg = y_pred_base[start_idx:end_idx]
                         y_pred_ensemble_seg = y_pred_ensemble[start_idx:end_idx]
 
-                        # 计算性能 using safe R² computation
+                        # 计算整体性能
                         mae_base = mean_absolute_error(y_true_seg, y_pred_base_seg)
                         mae_ensemble = mean_absolute_error(y_true_seg, y_pred_ensemble_seg)
                         rmse_base = np.sqrt(mean_squared_error(y_true_seg, y_pred_base_seg))
                         rmse_ensemble = np.sqrt(mean_squared_error(y_true_seg, y_pred_ensemble_seg))
-                        r2_base, _ = compute_r2_safe(y_true_seg, y_pred_base_seg, method='per_output_mean')
-                        r2_ensemble, _ = compute_r2_safe(y_true_seg, y_pred_ensemble_seg, method='per_output_mean')
+                        r2_base_overall, _ = compute_r2_safe(y_true_seg, y_pred_base_seg, method='per_output_mean')
+                        r2_ensemble_overall, _ = compute_r2_safe(y_true_seg, y_pred_ensemble_seg, method='per_output_mean')
 
-                        improvement_mae = (mae_base - mae_ensemble) / mae_base * 100
-                        improvement_rmse = (rmse_base - rmse_ensemble) / rmse_base * 100
+                        # 计算每个信号的R²
+                        r2_base_per_signal = []
+                        r2_ensemble_per_signal = []
+                        for i in range(num_signals):
+                            r2_base_i, _ = compute_r2_safe(
+                                y_true_seg[:, i:i+1],
+                                y_pred_base_seg[:, i:i+1],
+                                method='per_output_mean'
+                            )
+                            r2_ensemble_i, _ = compute_r2_safe(
+                                y_true_seg[:, i:i+1],
+                                y_pred_ensemble_seg[:, i:i+1],
+                                method='per_output_mean'
+                            )
+                            r2_base_per_signal.append(r2_base_i)
+                            r2_ensemble_per_signal.append(r2_ensemble_i)
+
+                        improvement_mae = (mae_base - mae_ensemble) / mae_base * 100 if mae_base != 0 else 0
+                        improvement_rmse = (rmse_base - rmse_ensemble) / rmse_base * 100 if rmse_base != 0 else 0
 
                         status = f"📊 二次推理比较结果\n"
                         status += f"=" * 60 + "\n\n"
                         status += f"📏 Index范围: [{start_idx}, {end_idx})\n"
-                        status += f"📈 样本数: {len(y_true_seg):,}\n\n"
+                        status += f"📈 样本数: {len(y_true_seg):,}\n"
+                        status += f"🎯 输出信号数: {num_signals}\n\n"
 
-                        status += f"性能对比:\n"
-                        status += f"{'指标':<15} {'SST模型':>15} {'综合模型':>15} {'改进':>12}\n"
+                        status += f"整体性能对比:\n"
+                        status += f"{'指标':<15} {'Stage1':>15} {'Ensemble':>15} {'改进':>12}\n"
                         status += "-" * 60 + "\n"
                         status += f"{'MAE':<15} {mae_base:>15.6f} {mae_ensemble:>15.6f} {improvement_mae:>11.2f}%\n"
                         status += f"{'RMSE':<15} {rmse_base:>15.6f} {rmse_ensemble:>15.6f} {improvement_rmse:>11.2f}%\n"
-                        status += f"{'R²':<15} {r2_base:>15.4f} {r2_ensemble:>15.4f}\n"
+                        status += f"{'R²':<15} {r2_base_overall:>15.4f} {r2_ensemble_overall:>15.4f}\n\n"
 
-                        # Create visualization - show all signals
-                        num_signals = y_true_seg.shape[1]
-                        n_signal_plots = min(6, num_signals)  # Show up to 6 signals in detail
+                        # Export CSV with all signal predictions and R² scores
+                        os.makedirs('saved_models/reinference_results', exist_ok=True)
+                        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                        csv_filename = f'saved_models/reinference_results/{ensemble_name}_idx{start_idx}-{end_idx}_{timestamp}.csv'
 
-                        # Create figure with more subplots for all signals
-                        fig = plt.figure(figsize=(20, 12))
-                        gs = fig.add_gridspec(3, 4, hspace=0.3, wspace=0.3)
+                        # Build CSV data
+                        csv_data = {'sample_index': np.arange(start_idx, end_idx)}
+
+                        for i, signal_name in enumerate(signal_names):
+                            csv_data[f'{signal_name}_true'] = y_true_seg[:, i]
+                            csv_data[f'{signal_name}_stage1_pred'] = y_pred_base_seg[:, i]
+                            csv_data[f'{signal_name}_ensemble_pred'] = y_pred_ensemble_seg[:, i]
+
+                        df_export = pd.DataFrame(csv_data)
+                        df_export.to_csv(csv_filename, index=False)
+
+                        # Also save R² scores summary
+                        r2_summary_filename = f'saved_models/reinference_results/{ensemble_name}_R2_summary_{timestamp}.csv'
+                        r2_summary_data = {
+                            'signal_name': signal_names,
+                            'r2_stage1': r2_base_per_signal,
+                            'r2_ensemble': r2_ensemble_per_signal,
+                            'delta_r2': [r2_ensemble_per_signal[i] - r2_base_per_signal[i] for i in range(num_signals)]
+                        }
+                        df_r2_summary = pd.DataFrame(r2_summary_data)
+                        df_r2_summary.to_csv(r2_summary_filename, index=False)
+
+                        status += f"✅ CSV结果已保存:\n"
+                        status += f"   📁 预测数据: {csv_filename}\n"
+                        status += f"   📁 R²汇总: {r2_summary_filename}\n\n"
+
+                        status += f"各信号R²对比:\n"
+                        status += f"{'信号':<20} {'Stage1 R²':>12} {'Ensemble R²':>12} {'Delta R²':>12}\n"
+                        status += "-" * 60 + "\n"
+                        for i, signal_name in enumerate(signal_names):
+                            delta_r2 = r2_ensemble_per_signal[i] - r2_base_per_signal[i]
+                            status += f"{signal_name:<20} {r2_base_per_signal[i]:>12.4f} {r2_ensemble_per_signal[i]:>12.4f} {delta_r2:>12.4f}\n"
+
+                        # Create visualization - show ALL signals
+                        # Layout: 1 summary row + rows for individual signals (4 per row)
+                        signals_per_row = 4
+                        num_signal_rows = (num_signals + signals_per_row - 1) // signals_per_row
+                        total_rows = 1 + num_signal_rows
+
+                        fig_height = 5 + num_signal_rows * 4
+                        fig = plt.figure(figsize=(24, fig_height))
+                        gs = fig.add_gridspec(total_rows, signals_per_row, hspace=0.35, wspace=0.3)
 
                         # Set font to avoid encoding issues
                         plt.rcParams['font.family'] = 'DejaVu Sans'
 
-                        fig.suptitle(f'Reinference Comparison - {ensemble_name}', fontsize=16, fontweight='bold')
+                        fig.suptitle(f'Reinference Comparison - {ensemble_name} (All {num_signals} Signals)',
+                                   fontsize=16, fontweight='bold', y=0.995)
 
-                        # Plot 1: Error comparison across samples (top left, spans 2 columns)
-                        ax1 = fig.add_subplot(gs[0, :2])
-                        plot_samples = min(500, len(y_true_seg))
-                        error_base = np.abs(y_true_seg - y_pred_base_seg).mean(axis=1)
-                        error_ensemble = np.abs(y_true_seg - y_pred_ensemble_seg).mean(axis=1)
-
-                        ax1.plot(error_base[:plot_samples], label='Base Model Error', alpha=0.7)
-                        ax1.plot(error_ensemble[:plot_samples], label='Ensemble Error', alpha=0.7)
-                        ax1.set_title('Mean Absolute Error Comparison', fontsize=12, fontweight='bold')
-                        ax1.legend()
-                        ax1.set_xlabel('Sample Index')
-                        ax1.set_ylabel('MAE')
-                        ax1.grid(alpha=0.3)
-
-                        # Plot 2: Error distribution (top right, spans 2 columns)
-                        ax2 = fig.add_subplot(gs[0, 2:])
-                        ax2.hist(error_base, bins=50, alpha=0.5, label='Base Model', edgecolor='black', color='skyblue')
-                        ax2.hist(error_ensemble, bins=50, alpha=0.5, label='Ensemble', edgecolor='black', color='orange')
-                        ax2.set_title('Error Distribution', fontsize=12, fontweight='bold')
-                        ax2.legend()
-                        ax2.set_xlabel('Error Magnitude')
-                        ax2.set_ylabel('Frequency')
-                        ax2.grid(alpha=0.3)
-
-                        # Plot 3: Performance metrics bar chart (middle left)
-                        ax3 = fig.add_subplot(gs[1, :2])
-                        metrics_labels = ['MAE', 'RMSE', 'R²']
-                        base_values = [mae_base, rmse_base, r2_base]
-                        ensemble_values = [mae_ensemble, rmse_ensemble, r2_ensemble]
-
-                        x_pos = np.arange(len(metrics_labels))
+                        # Row 0: R² comparison for all signals
+                        ax_summary = fig.add_subplot(gs[0, :])
+                        x = np.arange(num_signals)
                         width = 0.35
 
-                        ax3.bar(x_pos - width / 2, base_values, width, label='Base Model', alpha=0.8, color='skyblue')
-                        ax3.bar(x_pos + width / 2, ensemble_values, width, label='Ensemble', alpha=0.8, color='orange')
-                        ax3.set_title('Performance Metrics Comparison', fontsize=12, fontweight='bold')
-                        ax3.set_xticks(x_pos)
-                        ax3.set_xticklabels(metrics_labels)
-                        ax3.legend()
-                        ax3.grid(axis='y', alpha=0.3)
+                        bars1 = ax_summary.bar(x - width/2, r2_base_per_signal, width,
+                                             label='Stage1', alpha=0.8, color='skyblue')
+                        bars2 = ax_summary.bar(x + width/2, r2_ensemble_per_signal, width,
+                                             label='Ensemble', alpha=0.8, color='orange')
 
-                        # Plot 4: First signal prediction comparison (middle right)
-                        ax4 = fig.add_subplot(gs[1, 2:])
-                        ax4.plot(y_true_seg[:plot_samples, 0], label='Ground Truth', alpha=0.7, linewidth=1.5)
-                        ax4.plot(y_pred_base_seg[:plot_samples, 0], label='Base Model', alpha=0.7, linewidth=1.5)
-                        ax4.plot(y_pred_ensemble_seg[:plot_samples, 0], label='Ensemble', alpha=0.7, linewidth=1.5)
-                        ax4.set_title('Prediction Comparison (Signal 1)', fontsize=12, fontweight='bold')
-                        ax4.legend()
-                        ax4.set_xlabel('Sample Index')
-                        ax4.set_ylabel('Value')
-                        ax4.grid(alpha=0.3)
+                        ax_summary.set_xlabel('Signals', fontsize=11)
+                        ax_summary.set_ylabel('R² Score', fontsize=11)
+                        ax_summary.set_title('R² Comparison for All Signals', fontsize=13, fontweight='bold')
+                        ax_summary.set_xticks(x)
+                        ax_summary.set_xticklabels(signal_names, rotation=45, ha='right', fontsize=9)
+                        ax_summary.legend(fontsize=10)
+                        ax_summary.grid(axis='y', alpha=0.3)
+                        ax_summary.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
 
-                        # Plots 5-10: Individual signal predictions (bottom row, up to 4 more signals)
-                        for idx in range(1, min(5, num_signals)):
-                            col = (idx - 1)
-                            ax = fig.add_subplot(gs[2, col])
+                        # Add R² annotations
+                        for idx, (bar1, bar2) in enumerate(zip(bars1, bars2)):
+                            height1 = bar1.get_height()
+                            height2 = bar2.get_height()
+                            ax_summary.text(bar1.get_x() + bar1.get_width()/2., height1,
+                                          f'{r2_base_per_signal[idx]:.3f}',
+                                          ha='center', va='bottom', fontsize=7)
+                            ax_summary.text(bar2.get_x() + bar2.get_width()/2., height2,
+                                          f'{r2_ensemble_per_signal[idx]:.3f}',
+                                          ha='center', va='bottom', fontsize=7)
 
-                            ax.plot(y_true_seg[:plot_samples, idx], label='True', alpha=0.7, linewidth=1)
-                            ax.plot(y_pred_base_seg[:plot_samples, idx], label='Base', alpha=0.7, linewidth=1)
-                            ax.plot(y_pred_ensemble_seg[:plot_samples, idx], label='Ensemble', alpha=0.7, linewidth=1)
+                        # Rows 1+: Individual signal prediction plots (ALL signals)
+                        plot_samples = min(300, len(y_true_seg))
 
-                            ax.set_title(f'Signal {idx+1}', fontsize=10, fontweight='bold')
-                            ax.legend(fontsize=7)
-                            ax.set_xlabel('Sample', fontsize=8)
+                        for idx in range(num_signals):
+                            row = 1 + idx // signals_per_row
+                            col = idx % signals_per_row
+
+                            ax = fig.add_subplot(gs[row, col])
+
+                            signal_name = signal_names[idx]
+
+                            # Plot predictions vs true values
+                            ax.plot(y_true_seg[:plot_samples, idx], label='True',
+                                  alpha=0.8, linewidth=1.5, color='green')
+                            ax.plot(y_pred_base_seg[:plot_samples, idx], label='Stage1',
+                                  alpha=0.7, linewidth=1.2, color='skyblue')
+                            ax.plot(y_pred_ensemble_seg[:plot_samples, idx], label='Ensemble',
+                                  alpha=0.7, linewidth=1.2, color='orange')
+
+                            # Add R² scores in title
+                            ax.set_title(f'{signal_name}\nStage1 R²={r2_base_per_signal[idx]:.4f}, Ensemble R²={r2_ensemble_per_signal[idx]:.4f}',
+                                       fontsize=9, fontweight='bold')
+                            ax.legend(fontsize=7, loc='best')
+                            ax.set_xlabel('Sample Index', fontsize=8)
                             ax.set_ylabel('Value', fontsize=8)
                             ax.grid(alpha=0.3)
+                            ax.tick_params(labelsize=7)
 
                         plt.tight_layout()
 
@@ -4264,6 +4264,7 @@ if __name__ == "__main__":
     os.makedirs("saved_models", exist_ok=True)
     os.makedirs("saved_models/stage2_boost", exist_ok=True)
     os.makedirs("saved_models/ensemble", exist_ok=True)
+    os.makedirs("saved_models/reinference_results", exist_ok=True)
     print("✅ 已创建必要的模型保存目录")
 
     # Check if running in Colab
