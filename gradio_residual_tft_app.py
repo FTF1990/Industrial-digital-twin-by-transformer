@@ -3011,6 +3011,74 @@ def get_stage2_model_files():
         return []
 
 
+def get_stage2_scalers_files():
+    """
+    Get list of Stage2 scaler .pkl files in saved_models/stage2_boost folder
+
+    Returns:
+        List of Stage2 scaler file paths
+    """
+    try:
+        import glob
+
+        scaler_files = []
+
+        # Search in saved_models/stage2_boost folder
+        if os.path.exists('saved_models/stage2_boost'):
+            scaler_files.extend(glob.glob('saved_models/stage2_boost/*_scalers.pkl', recursive=False))
+
+        # Sort by modification time (newest first)
+        scaler_files = sorted(scaler_files, key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0, reverse=True)
+
+        return scaler_files if scaler_files else []
+
+    except Exception as e:
+        print(f"⚠️ Error in get_stage2_scalers_files: {e}")
+        return []
+
+
+def load_stage2_scalers(scaler_path, stage2_model_key):
+    """
+    Manually load scalers for a Stage2 model
+
+    Args:
+        scaler_path: Path to scaler .pkl file
+        stage2_model_key: Key of the Stage2 model in global_state
+
+    Returns:
+        status_message
+    """
+    try:
+        if not scaler_path or not os.path.exists(scaler_path):
+            return "❌ 请选择有效的Scaler文件！"
+
+        if not stage2_model_key:
+            return "❌ 请先选择一个Stage2模型！"
+
+        # Check if model exists
+        if stage2_model_key not in global_state['stage2_models']:
+            return f"❌ 模型 {stage2_model_key} 不存在！请先加载Stage2模型。"
+
+        # Load scalers
+        with open(scaler_path, 'rb') as f:
+            scalers = pickle.load(f)
+
+        # Store in global state
+        global_state['stage2_scalers'][stage2_model_key] = scalers
+
+        status_msg = f"✅ 成功加载 Scalers！\n\n"
+        status_msg += f"Scaler路径: {scaler_path}\n"
+        status_msg += f"关联模型: {stage2_model_key}\n"
+        status_msg += f"Scaler类型: {type(scalers)}\n"
+        if isinstance(scalers, dict):
+            status_msg += f"包含的键: {list(scalers.keys())}\n"
+
+        return status_msg
+
+    except Exception as e:
+        return f"❌ 加载失败:\n{str(e)}\n\n{traceback.format_exc()}"
+
+
 def load_stage2_from_inference_config(config_path):
     """
     Load Stage2 model from inference config JSON file
@@ -3598,6 +3666,17 @@ def create_unified_interface():
                             load_stage2_model_btn = gr.Button("📥 加载模型", size="sm", variant="secondary")
                             refresh_stage2_model_btn = gr.Button("🔄 刷新模型", size="sm")
 
+                        gr.Markdown("### 📊 加载Stage2 Scalers（可选）")
+                        gr.Markdown("如果模型加载失败提示缺少scalers，可在此手动加载")
+                        stage2_scalers_selector = gr.Dropdown(
+                            choices=get_stage2_scalers_files(),
+                            label="选择Stage2 Scalers文件",
+                            info="选择 *_scalers.pkl 文件"
+                        )
+                        with gr.Row():
+                            load_stage2_scalers_btn = gr.Button("📥 加载Scalers", size="sm", variant="secondary")
+                            refresh_stage2_scalers_btn = gr.Button("🔄 刷新Scalers", size="sm")
+
                         stage2_load_status = gr.Textbox(label="Stage2加载状态", lines=5, interactive=False)
 
                         gr.Markdown("### 🎚️ Delta R²阈值设置")
@@ -3670,6 +3749,17 @@ def create_unified_interface():
                     fn=load_stage2_model_ui,
                     inputs=[stage2_model_file_selector],
                     outputs=[stage2_model_selector, stage2_load_status]
+                )
+
+                refresh_stage2_scalers_btn.click(
+                    fn=lambda: gr.update(choices=get_stage2_scalers_files()),
+                    outputs=[stage2_scalers_selector]
+                )
+
+                load_stage2_scalers_btn.click(
+                    fn=load_stage2_scalers,
+                    inputs=[stage2_scalers_selector, stage2_model_selector],
+                    outputs=[stage2_load_status]
                 )
 
                 refresh_ensemble_btn.click(
