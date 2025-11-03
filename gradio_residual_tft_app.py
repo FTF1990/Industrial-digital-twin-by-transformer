@@ -644,7 +644,7 @@ def load_model_from_inference_config(config_file_path, device):
 def train_stage2_boost_model(
         residual_data_key: str,
         config: Dict[str, Any],
-        progress_callback=None
+        progress=None
 ) -> Tuple[str, Dict[str, Any]]:
     """
     Train Stage2 Boost residual model
@@ -652,7 +652,7 @@ def train_stage2_boost_model(
     Args:
         residual_data_key: Residual data key
         config: Training config
-        progress_callback: Progress callback function
+        progress: Gradio progress object for real-time updates
 
     Returns:
         status_msg: Training status message
@@ -885,8 +885,9 @@ def train_stage2_boost_model(
                 msg += f"\n  📚 LR: {current_lr:.2e}"
                 log_msg.append(msg)
 
-                if progress_callback:
-                    progress_callback("\n".join(log_msg))
+                # Update progress bar with current status
+                if progress:
+                    progress((epoch + 1) / config['epochs'], desc=f"Epoch {epoch+1}/{config['epochs']} - Val R²: {val_r2:.4f}")
 
             # Early stopping
             if patience_counter >= early_stop_patience:
@@ -990,35 +991,468 @@ def train_stage2_boost_model(
         return error_msg, {}
 
 
+def train_stage2_boost_model_generator(residual_data_key: str, config: Dict[str, Any], progress=None):
+    """
+    Generator version of train_stage2_boost_model for real-time log updates
+
+    Yields:
+        Current log message string after each progress update
+    """
+    try:
+        if residual_data_key not in global_state['residual_data']:
+            yield "❌ 残差数据不存在！"
+            return
+
+        log_msg = []
+        log_msg.append("=" * 80)
+        log_msg.append("🚀 开始训练 Stage2 Boost 残差模型")
+        log_msg.append("=" * 80)
+
+        # Get residual data
+        residuals_df = global_state['residual_data'][residual_data_key]['data']
+        residual_info = global_state['residual_data'][residual_data_key]['info']
+
+        boundary_signals = residual_info['boundary_signals']
+        target_signals = residual_info['target_signals']
+        residual_signals = residual_info['residual_signals']
+
+        log_msg.append(f"\n📊 数据信息:")
+        log_msg.append(f"  残差数据: {residual_data_key}")
+        log_msg.append(f"  边界信号数: {len(boundary_signals)}")
+        log_msg.append(f"  目标信号数: {len(target_signals)}")
+        log_msg.append(f"  数据长度: {len(residuals_df)}")
+
+        yield "\n".join(log_msg)
+
+        # Prepare training data
+        X = residuals_df[boundary_signals].values
+        y_residual = residuals_df[residual_signals].values
+
+        # Data split
+        train_size = int(len(X) * (1 - config['test_size'] - config['val_size']))
+        val_size = int(len(X) * config['val_size'])
+
+        X_train = X[:train_size]
+        X_val = X[train_size:train_size + val_size]
+        X_test = X[train_size + val_size:]
+
+        y_train = y_residual[:train_size]
+        y_val = y_residual[train_size:train_size + val_size]
+        y_test = y_residual[train_size + val_size:]
+
+        log_msg.append(f"\n🔀 数据分割:")
+        log_msg.append(f"  训练集: {len(X_train)} ({len(X_train) / len(X) * 100:.1f}%)")
+        log_msg.append(f"  验证集: {len(X_val)} ({len(X_val) / len(X) * 100:.1f}%)")
+        log_msg.append(f"  测试集: {len(X_test)} ({len(X_test) / len(X) * 100:.1f}%)")
+
+        # Data standardization
+        scaler_X = StandardScaler()
+        scaler_y = StandardScaler()
+
+        X_train_scaled = scaler_X.fit_transform(X_train)
+        X_val_scaled = scaler_X.transform(X_val)
+        X_test_scaled = scaler_X.transform(X_test)
+
+        y_train_scaled = scaler_y.fit_transform(y_train)
+        y_val_scaled = scaler_y.transform(y_val)
+        y_test_scaled = scaler_y.transform(y_test)
+
+        # Create DataLoader
+        train_dataset = torch.utils.data.TensorDataset(
+            torch.FloatTensor(X_train_scaled),
+            torch.FloatTensor(y_train_scaled)
+        )
+        val_dataset = torch.utils.data.TensorDataset(
+            torch.FloatTensor(X_val_scaled),
+            torch.FloatTensor(y_val_scaled)
+        )
+
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=config['batch_size'], shuffle=True
+        )
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset, batch_size=config['batch_size'], shuffle=False
+        )
+
+        # Initialize Stage2 model
+        log_msg.append(f"\n🏗️ 初始化Stage2残差模型:")
+        log_msg.append(f"  架构: StaticSensorTransformer")
+        log_msg.append(f"  d_model: {config['d_model']}")
+        log_msg.append(f"  nhead: {config['nhead']}")
+        log_msg.append(f"  num_layers: {config['num_layers']}")
+
+        stage2_model = StaticSensorTransformer(
+            num_boundary_sensors=len(boundary_signals),
+            num_target_sensors=len(target_signals),
+            d_model=config['d_model'],
+            nhead=config['nhead'],
+            num_layers=config['num_layers'],
+            dropout=config['dropout']
+        ).to(device)
+
+        # Optimizer and scheduler
+        optimizer = torch.optim.AdamW(
+            stage2_model.parameters(),
+            lr=config['lr'],
+            weight_decay=config.get('weight_decay', 1e-5)
+        )
+
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min',
+            factor=config.get('scheduler_factor', 0.7),
+            patience=config.get('scheduler_patience', 15)
+        )
+        log_msg.append(f"📊 学习率调度器: ReduceLROnPlateau")
+
+        criterion = nn.MSELoss()
+        scaler_amp = GradScaler()
+
+        # Training loop
+        log_msg.append(f"\n🎯 开始训练 (混合精度, 总轮数: {config['epochs']})")
+        yield "\n".join(log_msg)
+
+        history = {
+            'train_losses': [], 'val_losses': [],
+            'train_r2': [], 'val_r2': [],
+            'train_mae': [], 'val_mae': []
+        }
+
+        best_val_loss = float('inf')
+        patience_counter = 0
+        early_stop_patience = config.get('early_stop_patience', 25)
+
+        for epoch in range(config['epochs']):
+            # Training phase
+            stage2_model.train()
+            train_loss = 0.0
+            train_preds = []
+            train_targets = []
+
+            for batch_X, batch_y in train_loader:
+                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+                optimizer.zero_grad()
+
+                with autocast():
+                    outputs = stage2_model(batch_X)
+                    loss = criterion(outputs, batch_y)
+
+                scaler_amp.scale(loss).backward()
+                scaler_amp.unscale_(optimizer)
+
+                if config.get('grad_clip', 0) > 0:
+                    torch.nn.utils.clip_grad_norm_(stage2_model.parameters(), config['grad_clip'])
+
+                scaler_amp.step(optimizer)
+                scaler_amp.update()
+
+                train_loss += loss.item()
+                train_preds.append(outputs.detach().cpu().numpy())
+                train_targets.append(batch_y.detach().cpu().numpy())
+
+            train_loss /= len(train_loader)
+            train_preds = np.vstack(train_preds)
+            train_targets = np.vstack(train_targets)
+            train_r2, _ = compute_r2_safe(train_targets, train_preds, method='per_output_mean')
+            train_mae = mean_absolute_error(train_targets, train_preds)
+
+            # Validation phase
+            stage2_model.eval()
+            val_loss = 0.0
+            val_preds = []
+            val_targets = []
+
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+                    with autocast():
+                        outputs = stage2_model(batch_X)
+                        loss = criterion(outputs, batch_y)
+
+                    val_loss += loss.item()
+                    val_preds.append(outputs.cpu().numpy())
+                    val_targets.append(batch_y.cpu().numpy())
+
+            val_loss /= len(val_loader)
+            val_preds = np.vstack(val_preds)
+            val_targets = np.vstack(val_targets)
+            val_r2, _ = compute_r2_safe(val_targets, val_preds, method='per_output_mean')
+            val_mae = mean_absolute_error(val_targets, val_preds)
+
+            # Record history
+            history['train_losses'].append(train_loss)
+            history['val_losses'].append(val_loss)
+            history['train_r2'].append(train_r2)
+            history['val_r2'].append(val_r2)
+            history['train_mae'].append(train_mae)
+            history['val_mae'].append(val_mae)
+
+            scheduler.step(val_loss)
+
+            # Early stopping check
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+                best_model_state = stage2_model.state_dict().copy()
+            else:
+                patience_counter += 1
+
+            # Progress output - yield updates periodically
+            if (epoch + 1) % max(1, config['epochs'] // 20) == 0 or epoch == 0 or epoch == config['epochs'] - 1:
+                current_lr = optimizer.param_groups[0]['lr']
+                train_rmse = np.sqrt(train_loss)
+                val_rmse = np.sqrt(val_loss)
+
+                msg = f"\nEpoch {epoch + 1}/{config['epochs']}"
+                msg += f"\n  📉 Train: Loss={train_loss:.4f}, RMSE={train_rmse:.4f}, MAE={train_mae:.4f}, R²={train_r2:.4f}"
+                msg += f"\n  📊 Val:   Loss={val_loss:.4f}, RMSE={val_rmse:.4f}, MAE={val_mae:.4f}, R²={val_r2:.4f}"
+                msg += f"\n  🎯 Val/Train Ratio: {val_loss/train_loss:.2f}x"
+                msg += f"\n  📚 LR: {current_lr:.2e}"
+                log_msg.append(msg)
+
+                if progress:
+                    progress((epoch + 1) / config['epochs'], desc=f"Epoch {epoch+1}/{config['epochs']} - Val R²: {val_r2:.4f}")
+
+                # Yield current log state
+                yield "\n".join(log_msg)
+
+            # Early stopping
+            if patience_counter >= early_stop_patience:
+                log_msg.append(f"\n⏸️ 早停触发 (Epoch {epoch + 1})")
+                yield "\n".join(log_msg)
+                break
+
+        # Load best model
+        stage2_model.load_state_dict(best_model_state)
+
+        # Test set evaluation
+        y_test_pred = batch_inference(
+            stage2_model, X_test, scaler_X, scaler_y, device,
+            batch_size=config['batch_size'], model_name="Stage2"
+        )
+
+        test_mae = mean_absolute_error(y_test, y_test_pred)
+        test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+        test_r2, _ = compute_r2_safe(y_test, y_test_pred, method='per_output_mean')
+
+        # Training history summary
+        log_msg.append(f"\n📈 训练历史总结 ({len(history['train_losses'])} epochs):")
+        log_msg.append(f"  最佳验证Loss: {best_val_loss:.4f} (Epoch {np.argmin(history['val_losses']) + 1})")
+        log_msg.append(f"  最佳验证R²: {max(history['val_r2']):.4f} (Epoch {np.argmax(history['val_r2']) + 1})")
+        log_msg.append(f"  最佳验证MAE: {min(history['val_mae']):.4f} (Epoch {np.argmin(history['val_mae']) + 1})")
+
+        log_msg.append(f"\n📊 测试集性能:")
+        log_msg.append(f"  MAE: {test_mae:.6f}")
+        log_msg.append(f"  RMSE: {test_rmse:.6f}")
+        log_msg.append(f"  R²: {test_r2:.4f}")
+
+        # Save model
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        model_name = f"Stage2_Boost_{residual_data_key}_{timestamp}"
+
+        model_dir = "saved_models/stage2_boost"
+        os.makedirs(model_dir, exist_ok=True)
+
+        model_path = os.path.join(model_dir, f"{model_name}.pth")
+        torch.save({
+            'model_state_dict': stage2_model.state_dict(),
+            'config': config,
+            'history': history,
+            'residual_data_key': residual_data_key,
+            'boundary_signals': boundary_signals,
+            'target_signals': target_signals,
+            'residual_signals': residual_signals,
+            'test_metrics': {'mae': test_mae, 'rmse': test_rmse, 'r2': test_r2}
+        }, model_path)
+
+        # Save scalers
+        scaler_path = os.path.join(model_dir, f"{model_name}_scalers.pkl")
+        with open(scaler_path, 'wb') as f:
+            pickle.dump({'X': scaler_X, 'y': scaler_y}, f)
+
+        # Save to global state
+        global_state['stage2_models'][model_name] = {
+            'model': stage2_model,
+            'config': config,
+            'history': history,
+            'residual_data_key': residual_data_key,
+            'boundary_signals': boundary_signals,
+            'target_signals': target_signals,
+            'residual_signals': residual_signals,
+            'model_path': model_path,
+            'scaler_path': scaler_path,
+            'test_metrics': {'mae': test_mae, 'rmse': test_rmse, 'r2': test_r2}
+        }
+
+        global_state['stage2_scalers'][model_name] = {'X': scaler_X, 'y': scaler_y}
+
+        log_msg.append(f"\n✅ Stage2模型训练完成并保存:")
+        log_msg.append(f"  模型名称: {model_name}")
+        log_msg.append(f"  模型路径: {model_path}")
+        log_msg.append(f"  Scaler路径: {scaler_path}")
+
+        yield "\n".join(log_msg)
+
+    except Exception as e:
+        error_msg = f"❌ Stage2模型训练失败:\n{str(e)}\n\n{traceback.format_exc()}"
+        print(error_msg)
+        yield error_msg
+
+
+def create_ensemble_visualization(ensemble_info: Dict[str, Any]):
+    """
+    为综合模型创建可视化图表
+
+    包含：
+    1. 所有信号的R²对比柱状图
+    2. Delta R²分布图
+    3. 选择信号的饼图
+    4. 预测效果对比（随机选择几个信号）
+    """
+    try:
+        import matplotlib.pyplot as plt
+        import matplotlib
+        matplotlib.use('Agg')
+
+        signal_analysis = ensemble_info['signal_analysis']
+        target_signals = ensemble_info['signals']['target']
+
+        # 创建2x2子图
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle(f'综合模型分析 - {ensemble_info["name"]}', fontsize=16, fontweight='bold')
+
+        # 图1: R²对比柱状图
+        ax = axes[0, 0]
+        signals = [item['signal'] for item in signal_analysis]
+        r2_stage1 = [item['r2_stage1'] for item in signal_analysis]
+        r2_ensemble = [item['r2_ensemble'] for item in signal_analysis]
+
+        x = np.arange(len(signals))
+        width = 0.35
+
+        ax.bar(x - width/2, r2_stage1, width, label='Stage1', alpha=0.8, color='skyblue')
+        ax.bar(x + width/2, r2_ensemble, width, label='Ensemble', alpha=0.8, color='orange')
+
+        ax.set_xlabel('信号', fontsize=10)
+        ax.set_ylabel('R² 分数', fontsize=10)
+        ax.set_title('所有信号的R²对比', fontsize=12, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(signals, rotation=45, ha='right', fontsize=8)
+        ax.legend()
+        ax.grid(axis='y', alpha=0.3)
+        ax.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+
+        # 图2: Delta R²分布图
+        ax = axes[0, 1]
+        delta_r2_values = [item['delta_r2'] for item in signal_analysis]
+        colors = ['green' if item['use_stage2'] else 'gray' for item in signal_analysis]
+
+        bars = ax.barh(signals, delta_r2_values, color=colors, alpha=0.7)
+        ax.axvline(x=ensemble_info['delta_r2_threshold'], color='red', linestyle='--',
+                   linewidth=2, label=f'阈值 ({ensemble_info["delta_r2_threshold"]:.3f})')
+        ax.axvline(x=0, color='k', linestyle='-', linewidth=0.5)
+
+        ax.set_xlabel('Delta R² (Ensemble - Stage1)', fontsize=10)
+        ax.set_ylabel('信号', fontsize=10)
+        ax.set_title('Delta R²分布 (绿色=使用Stage2, 灰色=仅Stage1)', fontsize=12, fontweight='bold')
+        ax.legend()
+        ax.grid(axis='x', alpha=0.3)
+
+        # 图3: 选择策略饼图
+        ax = axes[1, 0]
+        num_use_stage2 = ensemble_info['num_use_stage2']
+        num_use_stage1 = ensemble_info['num_use_stage1_only']
+
+        sizes = [num_use_stage2, num_use_stage1]
+        labels = [f'Stage1+Stage2\n({num_use_stage2}个)', f'仅Stage1\n({num_use_stage1}个)']
+        colors_pie = ['#ff9999', '#66b3ff']
+        explode = (0.05, 0)
+
+        ax.pie(sizes, explode=explode, labels=labels, colors=colors_pie, autopct='%1.1f%%',
+               shadow=True, startangle=90, textprops={'fontsize': 11})
+        ax.set_title('信号选择策略分布', fontsize=12, fontweight='bold')
+
+        # 图4: 整体性能对比
+        ax = axes[1, 1]
+        metrics = ensemble_info['metrics']
+
+        categories = ['MAE', 'RMSE', 'R²']
+        stage1_values = [metrics['stage1']['mae'], metrics['stage1']['rmse'], metrics['stage1']['r2']]
+        ensemble_values = [metrics['ensemble']['mae'], metrics['ensemble']['rmse'], metrics['ensemble']['r2']]
+
+        # 归一化显示（R²本身就是0-1，MAE和RMSE需要归一化）
+        max_mae_rmse = max(max(stage1_values[:2]), max(ensemble_values[:2]))
+        stage1_normalized = [stage1_values[0]/max_mae_rmse, stage1_values[1]/max_mae_rmse, stage1_values[2]]
+        ensemble_normalized = [ensemble_values[0]/max_mae_rmse, ensemble_values[1]/max_mae_rmse, ensemble_values[2]]
+
+        x = np.arange(len(categories))
+        width = 0.35
+
+        bars1 = ax.bar(x - width/2, stage1_normalized, width, label='Stage1', alpha=0.8, color='skyblue')
+        bars2 = ax.bar(x + width/2, ensemble_normalized, width, label='Ensemble', alpha=0.8, color='orange')
+
+        ax.set_ylabel('归一化值', fontsize=10)
+        ax.set_title('整体性能对比 (测试集)', fontsize=12, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels(categories)
+        ax.legend()
+        ax.grid(axis='y', alpha=0.3)
+
+        # 添加实际值标注
+        for i, (bar1, bar2) in enumerate(zip(bars1, bars2)):
+            height1 = bar1.get_height()
+            height2 = bar2.get_height()
+            ax.text(bar1.get_x() + bar1.get_width()/2., height1,
+                   f'{stage1_values[i]:.4f}',
+                   ha='center', va='bottom', fontsize=8)
+            ax.text(bar2.get_x() + bar2.get_width()/2., height2,
+                   f'{ensemble_values[i]:.4f}',
+                   ha='center', va='bottom', fontsize=8)
+
+        plt.tight_layout()
+        return fig
+
+    except Exception as e:
+        print(f"⚠️ 可视化生成失败: {e}")
+        traceback.print_exc()
+        return None
+
+
 def compute_signal_r2_and_select_threshold(
         base_model_name: str,
         stage2_model_name: str,
-        r2_threshold: float = 0.4
-) -> Tuple[str, Dict[str, Any]]:
+        delta_r2_threshold: float = 0.05
+) -> Tuple[str, Dict[str, Any], Any]:
     """
-    Compute R² score for each signal, intelligently select R² threshold, generate ensemble inference model
+    使用Delta R²策略生成综合推理模型 (仅在测试集上评估)
+
+    新逻辑：
+    1. 使用Stage2训练的测试集数据
+    2. 计算每个信号的 Delta R² = R²_ensemble - R²_stage1
+    3. 如果 Delta R² > 阈值，说明Stage2有显著提升，使用Stage1+Stage2
+    4. 否则只使用Stage1预测
 
     Args:
-        base_model_name: 基础SSTModel name
-        stage2_model_name: Stage2残差Model name
-        r2_threshold: R² threshold (apply Stage2 only to signals with R² < threshold)
+        base_model_name: 基础SST模型名称
+        stage2_model_name: Stage2残差模型名称
+        delta_r2_threshold: Delta R²阈值 (默认0.05，即5%提升)
 
     Returns:
-        status_msg: Status message
-        ensemble_info: Ensemble model info
+        status_msg: 状态信息
+        ensemble_info: 综合模型信息
+        fig: 可视化图表
     """
     try:
         log_msg = []
         log_msg.append("=" * 80)
-        log_msg.append("🎯 计算信号R²分数并生成综合推理模型")
+        log_msg.append("🎯 生成综合推理模型 (Delta R² 策略)")
         log_msg.append("=" * 80)
 
         # Check if models exist
         if base_model_name not in global_state['trained_models']:
-            return f"❌ 基础模型 {base_model_name} 不存在！", {}
+            return f"❌ 基础模型 {base_model_name} 不存在！", {}, None
 
         if stage2_model_name not in global_state['stage2_models']:
-            return f"❌ Stage2模型 {stage2_model_name} 不存在！", {}
+            return f"❌ Stage2模型 {stage2_model_name} 不存在！", {}, None
 
         # Get models
         base_model_info = global_state['trained_models'][base_model_name]
@@ -1026,11 +1460,12 @@ def compute_signal_r2_and_select_threshold(
 
         base_model = base_model_info['model']
         stage2_model = stage2_model_info['model']
+        stage2_config = stage2_model_info['config']
 
         # Get residual data
         residual_data_key = stage2_model_info['residual_data_key']
         if residual_data_key not in global_state['residual_data']:
-            return f"❌ 残差数据 {residual_data_key} 不存在！", {}
+            return f"❌ 残差数据 {residual_data_key} 不存在！", {}, None
 
         residuals_df = global_state['residual_data'][residual_data_key]['data']
         residual_info = global_state['residual_data'][residual_data_key]['info']
@@ -1038,23 +1473,39 @@ def compute_signal_r2_and_select_threshold(
         boundary_signals = residual_info['boundary_signals']
         target_signals = residual_info['target_signals']
 
-        log_msg.append(f"\n📊 数据信息:")
+        log_msg.append(f"\n📊 模型信息:")
         log_msg.append(f"  基础模型: {base_model_name}")
         log_msg.append(f"  Stage2模型: {stage2_model_name}")
         log_msg.append(f"  目标信号数: {len(target_signals)}")
+        log_msg.append(f"  Delta R²阈值: {delta_r2_threshold:.3f} ({delta_r2_threshold*100:.1f}%)")
 
-        # Get true values and predictions
+        # 使用Stage2训练时相同的数据分割获取测试集
+        test_size = stage2_config.get('test_size', 0.2)
+        val_size = stage2_config.get('val_size', 0.1)
+
+        total_size = len(residuals_df)
+        train_size = int(total_size * (1 - test_size - val_size))
+        val_size_actual = int(total_size * val_size)
+        test_start_idx = train_size + val_size_actual
+
+        log_msg.append(f"\n🔀 数据分割 (使用测试集评估):")
+        log_msg.append(f"  总数据: {total_size}")
+        log_msg.append(f"  训练集: {train_size} ({train_size/total_size*100:.1f}%)")
+        log_msg.append(f"  验证集: {val_size_actual} ({val_size_actual/total_size*100:.1f}%)")
+        log_msg.append(f"  测试集: {total_size - test_start_idx} ({(total_size - test_start_idx)/total_size*100:.1f}%)")
+
+        # 提取测试集数据
         y_true_cols = [f"{sig}_true" for sig in target_signals]
         y_pred_cols = [f"{sig}_pred" for sig in target_signals]
 
-        y_true = residuals_df[y_true_cols].values
-        y_pred_base = residuals_df[y_pred_cols].values
+        y_true_test = residuals_df[y_true_cols].iloc[test_start_idx:].values
+        y_pred_stage1_test = residuals_df[y_pred_cols].iloc[test_start_idx:].values
+        X_test = residuals_df[boundary_signals].iloc[test_start_idx:].values
 
-        # Stage2 residual prediction using batch inference
-        X = residuals_df[boundary_signals].values
-        y_residual_pred = batch_inference(
+        # 使用Stage2模型预测测试集残差
+        y_residual_pred_test = batch_inference(
             stage2_model,
-            X,
+            X_test,
             global_state['stage2_scalers'][stage2_model_name]['X'],
             global_state['stage2_scalers'][stage2_model_name]['y'],
             device,
@@ -1062,124 +1513,189 @@ def compute_signal_r2_and_select_threshold(
             model_name="Stage2"
         )
 
-        # Compute R² for each signal using safe computation
-        signal_r2_scores = []
-        _, per_signal_r2 = compute_r2_safe(y_true, y_pred_base, method='per_output_mean')
+        # 计算每个信号的R²分数
+        signal_analysis = []
 
         for i, signal in enumerate(target_signals):
-            r2 = per_signal_r2[i]
-            signal_r2_scores.append({
+            y_true_sig = y_true_test[:, i]
+            y_pred_stage1_sig = y_pred_stage1_test[:, i]
+            y_pred_ensemble_sig = y_pred_stage1_sig + y_residual_pred_test[:, i]
+
+            # 计算Stage1的R²
+            r2_stage1, _ = compute_r2_safe(
+                y_true_sig.reshape(-1, 1),
+                y_pred_stage1_sig.reshape(-1, 1),
+                method='per_output_mean'
+            )
+
+            # 计算Ensemble的R²
+            r2_ensemble, _ = compute_r2_safe(
+                y_true_sig.reshape(-1, 1),
+                y_pred_ensemble_sig.reshape(-1, 1),
+                method='per_output_mean'
+            )
+
+            # 计算Delta R²
+            delta_r2 = r2_ensemble - r2_stage1
+
+            # 判断是否使用Stage2
+            use_stage2 = delta_r2 > delta_r2_threshold
+
+            signal_analysis.append({
                 'signal': signal,
-                'r2': r2,
-                'apply_stage2': r2 < r2_threshold
+                'r2_stage1': float(r2_stage1),
+                'r2_ensemble': float(r2_ensemble),
+                'delta_r2': float(delta_r2),
+                'use_stage2': bool(use_stage2)
             })
 
-        log_msg.append(f"\n🎯 信号R²分析 (阈值: {r2_threshold}):")
-        log_msg.append(f"{'信号名称':<30} {'R²分数':>10} {'应用Stage2':>12}")
-        log_msg.append("-" * 55)
+        # 统计使用Stage2的信号数
+        num_use_stage2 = sum(1 for item in signal_analysis if item['use_stage2'])
+        num_use_stage1_only = len(target_signals) - num_use_stage2
 
-        num_signals_use_stage2 = 0
-        for item in signal_r2_scores:
+        log_msg.append(f"\n🎯 信号Delta R²分析:")
+        log_msg.append(f"{'信号名称':<30} {'Stage1 R²':>12} {'Ensemble R²':>12} {'Delta R²':>12} {'选择':>10}")
+        log_msg.append("-" * 80)
+
+        for item in signal_analysis:
+            choice = "Stage1+2" if item['use_stage2'] else "Stage1"
             log_msg.append(
-                f"{item['signal']:<30} {item['r2']:>10.4f} {'✓' if item['apply_stage2'] else '✗':>12}"
+                f"{item['signal']:<30} {item['r2_stage1']:>12.4f} {item['r2_ensemble']:>12.4f} "
+                f"{item['delta_r2']:>12.4f} {choice:>10}"
             )
-            if item['apply_stage2']:
-                num_signals_use_stage2 += 1
 
-        log_msg.append("-" * 55)
-        log_msg.append(f"需要Stage2的信号数: {num_signals_use_stage2} / {len(target_signals)}")
+        log_msg.append("-" * 80)
+        log_msg.append(f"使用Stage1+Stage2: {num_use_stage2} 个信号")
+        log_msg.append(f"仅使用Stage1: {num_use_stage1_only} 个信号")
 
-        # Generate ensemble prediction (selectively apply Stage2)
-        y_ensemble = y_pred_base.copy()
-        for i, item in enumerate(signal_r2_scores):
-            if item['apply_stage2']:
-                # Apply Stage2 correction
-                y_ensemble[:, i] = y_pred_base[:, i] + y_residual_pred[:, i]
+        # 生成最终综合预测（在测试集上）
+        y_ensemble_test = y_pred_stage1_test.copy()
+        for i, item in enumerate(signal_analysis):
+            if item['use_stage2']:
+                y_ensemble_test[:, i] = y_pred_stage1_test[:, i] + y_residual_pred_test[:, i]
 
-        # Compute ensemble model performance using safe R² computation
-        mae_base = mean_absolute_error(y_true, y_pred_base)
-        mae_ensemble = mean_absolute_error(y_true, y_ensemble)
-        rmse_base = np.sqrt(mean_squared_error(y_true, y_pred_base))
-        rmse_ensemble = np.sqrt(mean_squared_error(y_true, y_ensemble))
-        r2_base, _ = compute_r2_safe(y_true, y_pred_base, method='per_output_mean')
-        r2_ensemble, _ = compute_r2_safe(y_true, y_ensemble, method='per_output_mean')
+        # 计算整体性能
+        mae_stage1 = mean_absolute_error(y_true_test, y_pred_stage1_test)
+        mae_ensemble = mean_absolute_error(y_true_test, y_ensemble_test)
+        rmse_stage1 = np.sqrt(mean_squared_error(y_true_test, y_pred_stage1_test))
+        rmse_ensemble = np.sqrt(mean_squared_error(y_true_test, y_ensemble_test))
+        r2_stage1, _ = compute_r2_safe(y_true_test, y_pred_stage1_test, method='per_output_mean')
+        r2_ensemble, _ = compute_r2_safe(y_true_test, y_ensemble_test, method='per_output_mean')
 
-        improvement_mae = (mae_base - mae_ensemble) / mae_base * 100
-        improvement_rmse = (rmse_base - rmse_ensemble) / rmse_base * 100
-        improvement_r2 = (r2_ensemble - r2_base) / (1 - r2_base) * 100
+        improvement_mae = (mae_stage1 - mae_ensemble) / mae_stage1 * 100 if mae_stage1 > 0 else 0
+        improvement_rmse = (rmse_stage1 - rmse_ensemble) / rmse_stage1 * 100 if rmse_stage1 > 0 else 0
+        improvement_r2 = (r2_ensemble - r2_stage1) / (1 - r2_stage1) * 100 if r2_stage1 < 1 else 0
 
-        log_msg.append(f"\n📈 性能对比:")
-        log_msg.append(f"{'指标':<15} {'基础模型(SST)':>18} {'综合模型':>18} {'改进':>15}")
-        log_msg.append("-" * 70)
-        log_msg.append(f"{'MAE':<15} {mae_base:>18.6f} {mae_ensemble:>18.6f} {improvement_mae:>14.2f}%")
-        log_msg.append(f"{'RMSE':<15} {rmse_base:>18.6f} {rmse_ensemble:>18.6f} {improvement_rmse:>14.2f}%")
-        log_msg.append(f"{'R²':<15} {r2_base:>18.4f} {r2_ensemble:>18.4f} {improvement_r2:>14.2f}%")
+        log_msg.append(f"\n📈 整体性能对比 (测试集):")
+        log_msg.append(f"{'指标':<15} {'Stage1':>15} {'Ensemble':>15} {'改进':>15}")
+        log_msg.append("-" * 65)
+        log_msg.append(f"{'MAE':<15} {mae_stage1:>15.6f} {mae_ensemble:>15.6f} {improvement_mae:>14.2f}%")
+        log_msg.append(f"{'RMSE':<15} {rmse_stage1:>15.6f} {rmse_ensemble:>15.6f} {improvement_rmse:>14.2f}%")
+        log_msg.append(f"{'R²':<15} {r2_stage1:>15.4f} {r2_ensemble:>15.4f} {improvement_r2:>14.2f}%")
 
-        # 保存Ensemble model info
+        # 保存综合模型信息
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        ensemble_name = f"Ensemble_{base_model_name}_{stage2_model_name}_{timestamp}"
+        ensemble_name = f"Ensemble_{base_model_name}_{timestamp}"
 
         ensemble_info = {
             'name': ensemble_name,
             'base_model_name': base_model_name,
             'stage2_model_name': stage2_model_name,
-            'r2_threshold': r2_threshold,
-            'signal_r2_scores': signal_r2_scores,
-            'num_signals_use_stage2': num_signals_use_stage2,
+            'delta_r2_threshold': float(delta_r2_threshold),
+            'signal_analysis': signal_analysis,
+            'num_use_stage2': int(num_use_stage2),
+            'num_use_stage1_only': int(num_use_stage1_only),
             'metrics': {
-                'base': {'mae': mae_base, 'rmse': rmse_base, 'r2': r2_base},
-                'ensemble': {'mae': mae_ensemble, 'rmse': rmse_ensemble, 'r2': r2_ensemble},
+                'stage1': {
+                    'mae': float(mae_stage1),
+                    'rmse': float(rmse_stage1),
+                    'r2': float(r2_stage1)
+                },
+                'ensemble': {
+                    'mae': float(mae_ensemble),
+                    'rmse': float(rmse_ensemble),
+                    'r2': float(r2_ensemble)
+                },
                 'improvement': {
-                    'mae_pct': improvement_mae,
-                    'rmse_pct': improvement_rmse,
-                    'r2_pct': improvement_r2
+                    'mae_pct': float(improvement_mae),
+                    'rmse_pct': float(improvement_rmse),
+                    'r2_pct': float(improvement_r2)
                 }
             },
             'predictions': {
-                'y_true': y_true,
-                'y_pred_base': y_pred_base,
-                'y_pred_ensemble': y_ensemble,
-                'y_residual_pred': y_residual_pred
+                'y_true': y_true_test,
+                'y_pred_stage1': y_pred_stage1_test,
+                'y_pred_ensemble': y_ensemble_test,
+                'y_residual_pred': y_residual_pred_test
             },
             'signals': {
                 'boundary': boundary_signals,
                 'target': target_signals
+            },
+            'data_split': {
+                'test_size': float(test_size),
+                'val_size': float(val_size),
+                'test_start_idx': int(test_start_idx),
+                'test_samples': int(len(y_true_test))
             },
             'created_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
 
         global_state['ensemble_models'][ensemble_name] = ensemble_info
 
-        # Save ensemble model config
+        # 保存配置文件
         ensemble_dir = "saved_models/ensemble"
         os.makedirs(ensemble_dir, exist_ok=True)
 
         config_path = os.path.join(ensemble_dir, f"{ensemble_name}_config.json")
         with open(config_path, 'w', encoding='utf-8') as f:
-            # Save config (excluding large arrays)
+            # 保存配置（排除大数组，确保所有类型可JSON序列化）
             save_config = {
                 'name': ensemble_name,
                 'base_model_name': base_model_name,
                 'stage2_model_name': stage2_model_name,
-                'r2_threshold': r2_threshold,
-                'signal_r2_scores': signal_r2_scores,
-                'num_signals_use_stage2': num_signals_use_stage2,
-                'metrics': ensemble_info['metrics'],
+                'delta_r2_threshold': float(delta_r2_threshold),
+                'signal_analysis': signal_analysis,  # 已转换为Python原生类型
+                'num_use_stage2': int(num_use_stage2),
+                'num_use_stage1_only': int(num_use_stage1_only),
+                'metrics': ensemble_info['metrics'],  # 已转换
                 'signals': ensemble_info['signals'],
+                'data_split': ensemble_info['data_split'],
                 'created_time': ensemble_info['created_time']
             }
             json.dump(save_config, f, indent=2, ensure_ascii=False)
 
+        # 生成汇总CSV文件
+        csv_path = os.path.join(ensemble_dir, f"{ensemble_name}_summary.csv")
+        summary_data = []
+        for item in signal_analysis:
+            summary_data.append({
+                '信号名称': item['signal'],
+                'Stage1_R2': item['r2_stage1'],
+                'Ensemble_R2': item['r2_ensemble'],
+                'Delta_R2': item['delta_r2'],
+                'R2提升(%)': item['delta_r2'] * 100,
+                '选择模型': 'Stage1+Stage2' if item['use_stage2'] else 'Stage1',
+                '是否使用Stage2': 'Yes' if item['use_stage2'] else 'No'
+            })
+
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+
         log_msg.append(f"\n✅ 综合推理模型已生成:")
         log_msg.append(f"  模型名称: {ensemble_name}")
         log_msg.append(f"  配置路径: {config_path}")
+        log_msg.append(f"  汇总CSV: {csv_path}")
 
-        return "\n".join(log_msg), ensemble_info
+        # 生成可视化图表
+        fig = create_ensemble_visualization(ensemble_info)
+
+        return "\n".join(log_msg), ensemble_info, fig
 
     except Exception as e:
         error_msg = f"❌ 综合模型生成失败:\n{str(e)}\n\n{traceback.format_exc()}"
         print(error_msg)
-        return error_msg, {}
+        return error_msg, {}, None
 
 
 # ============================================================================
@@ -1824,6 +2340,61 @@ def get_inference_config_files():
         return []
 
 
+def get_scalers_files():
+    """
+    Get list of scaler pkl files in saved_models folder
+
+    Returns:
+        List of scaler file paths
+    """
+    try:
+        import glob
+
+        scaler_files = []
+
+        # Search in saved_models folder and subdirectories
+        if os.path.exists('saved_models'):
+            scaler_files.extend(glob.glob('saved_models/**/*_scalers.pkl', recursive=True))
+
+        # Sort by modification time (newest first)
+        scaler_files = sorted(scaler_files, key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0, reverse=True)
+
+        return scaler_files if scaler_files else []
+
+    except Exception as e:
+        print(f"⚠️ Error in get_scalers_files: {e}")
+        return []
+
+
+def get_model_files():
+    """
+    Get list of model pth files in saved_models folder
+
+    Returns:
+        List of model file paths
+    """
+    try:
+        import glob
+
+        model_files = []
+
+        # Search in saved_models folder and subdirectories
+        if os.path.exists('saved_models'):
+            # Get all .pth files, excluding scalers
+            all_pth_files = glob.glob('saved_models/**/*.pth', recursive=True)
+            # Filter out files that are not model files (e.g., optimizer states)
+            model_files = [f for f in all_pth_files if not f.endswith('_scalers.pth')]
+
+        # Sort by modification time (newest first)
+        model_files = sorted(model_files, key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0, reverse=True)
+
+        return model_files if model_files else []
+
+    except Exception as e:
+        print(f"⚠️ Error in get_model_files: {e}")
+        return []
+
+
 def load_model_from_inference_config_path(config_path):
     """
     Load model from inference config file path
@@ -1864,26 +2435,29 @@ def load_model_from_inference_config_path(config_path):
         return None, f"❌ 加载失败: {str(e)}"
 
 
-def load_scalers_file(scaler_file, model_name):
+def load_scalers_from_path(scaler_path, model_name):
     """
-    Load scalers from a pickle file for a specific model
+    Load scalers from a pickle file path for a specific model
 
     Args:
-        scaler_file: Uploaded scaler file object
+        scaler_path: Path to scaler pickle file
         model_name: Model name to associate the scalers with
 
     Returns:
         status_msg: Status message
     """
     try:
-        if not scaler_file:
-            return "❌ 请上传scalers文件！"
+        if not scaler_path:
+            return "❌ 请选择scalers文件！"
 
         if not model_name:
             return "❌ 请先选择模型！"
 
+        if not os.path.exists(scaler_path):
+            return f"❌ 文件不存在: {scaler_path}"
+
         # Load scalers from file
-        with open(scaler_file.name, 'rb') as f:
+        with open(scaler_path, 'rb') as f:
             scalers = pickle.load(f)
 
         # Save to global state
@@ -1909,6 +2483,138 @@ def load_scalers_file(scaler_file, model_name):
         error_msg = f"❌ Scalers加载失败:\n{str(e)}\n\n{traceback.format_exc()}"
         print(error_msg)
         return error_msg
+
+
+def load_model_from_path(model_path):
+    """
+    Load SST model from a .pth file path
+
+    Args:
+        model_path: Path to model .pth file
+
+    Returns:
+        model_name: Loaded model name
+        status_msg: Status message
+    """
+    try:
+        if not model_path:
+            return None, "❌ 请选择模型文件！"
+
+        if not os.path.exists(model_path):
+            return None, f"❌ 文件不存在: {model_path}"
+
+        # Extract model name from path
+        model_name = os.path.splitext(os.path.basename(model_path))[0]
+
+        # Load checkpoint
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+
+        if 'model_config' not in checkpoint:
+            return None, f"❌ 模型文件格式错误: 缺少model_config"
+
+        model_config = checkpoint['model_config']
+
+        if model_config.get('type') != 'StaticSensorTransformer':
+            return None, f"❌ 不支持的模型类型: {model_config.get('type')}"
+
+        boundary_signals = model_config['boundary_signals']
+        target_signals = model_config['target_signals']
+        config = model_config['config']
+
+        # Create model
+        model = StaticSensorTransformer(
+            num_boundary_sensors=len(boundary_signals),
+            num_target_sensors=len(target_signals),
+            d_model=config['d_model'],
+            nhead=config['nhead'],
+            num_layers=config['num_layers'],
+            dropout=config['dropout']
+        ).to(device)
+
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+
+        # Try to load scalers from checkpoint
+        scalers = None
+        scaler_source = "未加载"
+        if 'scalers' in checkpoint:
+            scalers = checkpoint['scalers']
+            scaler_source = "从checkpoint加载"
+            # Also save to manual_scalers for consistency
+            if 'manual_scalers' not in global_state:
+                global_state['manual_scalers'] = {}
+            global_state['manual_scalers'][model_name] = scalers
+
+        # Save to global state
+        global_state['trained_models'][model_name] = {
+            'model': model,
+            'type': model_config['type'],
+            'boundary_signals': boundary_signals,
+            'target_signals': target_signals,
+            'config': config,
+            'model_path': model_path,
+            'scaler_path': model_path.replace('.pth', '_scalers.pkl')
+        }
+
+        success_msg = f"✅ SST模型加载成功!\n\n"
+        success_msg += f"📌 Model name: {model_name}\n"
+        success_msg += f"📊 Model type: {model_config['type']}\n"
+        success_msg += f"🎯 边界信号数: {len(boundary_signals)}\n"
+        success_msg += f"📈 目标信号数: {len(target_signals)}\n"
+        success_msg += f"⚙️ 模型参数: d_model={config['d_model']}, nhead={config['nhead']}, layers={config['num_layers']}\n"
+        success_msg += f"📊 Scalers状态: {scaler_source}\n"
+
+        if scalers is None:
+            success_msg += f"\n⚠️ 提示: 该模型checkpoint中不包含scalers\n"
+            success_msg += f"   如需提取残差，请从下方'加载Scalers文件'区域手动加载\n"
+
+        print(success_msg)
+        return model_name, success_msg
+
+    except Exception as e:
+        error_msg = f"❌ 模型加载失败:\n{str(e)}\n\n{traceback.format_exc()}"
+        print(error_msg)
+        return None, error_msg
+
+
+def load_model_from_path_ui(model_path):
+    """
+    UI wrapper for load_model_from_path to properly update dropdown
+
+    Args:
+        model_path: Path to model file
+
+    Returns:
+        tuple: (dropdown_update, status_msg)
+    """
+    model_name, status_msg = load_model_from_path(model_path)
+
+    if model_name:
+        # Update dropdown choices and set the value
+        return gr.update(choices=get_available_models(), value=model_name), status_msg
+    else:
+        # Just return status without updating dropdown
+        return gr.update(), status_msg
+
+
+def load_model_from_inference_config_path_ui(config_path):
+    """
+    UI wrapper for load_model_from_inference_config_path to properly update dropdown
+
+    Args:
+        config_path: Path to inference config file
+
+    Returns:
+        tuple: (dropdown_update, status_msg)
+    """
+    model_name, status_msg = load_model_from_inference_config_path(config_path)
+
+    if model_name:
+        # Update dropdown choices and set the value
+        return gr.update(choices=get_available_models(), value=model_name), status_msg
+    else:
+        # Just return status without updating dropdown
+        return gr.update(), status_msg
 
 
 def extract_residuals_ui(model_name):
@@ -2018,6 +2724,12 @@ def extract_residuals_ui(model_name):
         true_cols = [f"{sig}_true" for sig in target_signals]
 
         residuals_data = {}
+
+        # Add boundary signals (input features) - needed for Stage2 training
+        for i, sig in enumerate(boundary_signals):
+            residuals_data[sig] = X[:, i]
+
+        # Add residuals, predictions, and true values
         for i, sig in enumerate(target_signals):
             residuals_data[f"{sig}_residual"] = residuals[:, i]
             residuals_data[f"{sig}_pred"] = y_pred[:, i]
@@ -2280,13 +2992,28 @@ def create_unified_interface():
 
                         inference_load_status = gr.Textbox(label="配置加载状态", lines=3, interactive=False)
 
-                        gr.Markdown("### 📊 加载Scalers文件（可选）")
-                        gr.Markdown("如果模型checkpoint中不包含scalers，需要手动上传")
-                        scalers_file = gr.File(
-                            label="上传Scalers文件 (*_scalers.pkl)",
-                            file_types=['.pkl']
+                        gr.Markdown("### 🤖 加载SST模型文件（可选）")
+                        gr.Markdown("从saved_models文件夹选择.pth模型文件直接加载")
+                        model_file_selector = gr.Dropdown(
+                            choices=[],
+                            label="选择saved_models文件夹下的模型文件",
+                            info="选择 *.pth 文件"
                         )
-                        load_scalers_btn = gr.Button("📥 加载Scalers", size="sm", variant="secondary")
+                        with gr.Row():
+                            load_model_file_btn = gr.Button("📥 加载模型", size="sm", variant="secondary")
+                            refresh_model_files_btn = gr.Button("🔄 刷新模型列表", size="sm")
+                        model_load_status = gr.Textbox(label="模型加载状态", lines=3, interactive=False)
+
+                        gr.Markdown("### 📊 加载Scalers文件（可选）")
+                        gr.Markdown("如果模型checkpoint中不包含scalers，从saved_models文件夹选择")
+                        scalers_file_selector = gr.Dropdown(
+                            choices=[],
+                            label="选择saved_models文件夹下的Scalers文件",
+                            info="选择 *_scalers.pkl 文件"
+                        )
+                        with gr.Row():
+                            load_scalers_btn = gr.Button("📥 加载Scalers", size="sm", variant="secondary")
+                            refresh_scalers_btn = gr.Button("🔄 刷新Scalers列表", size="sm")
                         scalers_load_status = gr.Textbox(label="Scalers加载状态", lines=3, interactive=False)
 
                         extract_btn = gr.Button("🔬 提取残差（全数据集）", variant="primary", size="lg")
@@ -2309,15 +3036,34 @@ def create_unified_interface():
 
                 # Load inference config from selector
                 load_inference_btn.click(
-                    fn=load_model_from_inference_config_path,
+                    fn=load_model_from_inference_config_path_ui,
                     inputs=[inference_config_selector],
                     outputs=[model_selector, inference_load_status]
                 )
 
+                # Refresh model file list
+                refresh_model_files_btn.click(
+                    fn=lambda: gr.update(choices=get_model_files()),
+                    outputs=[model_file_selector]
+                )
+
+                # Load model file
+                load_model_file_btn.click(
+                    fn=load_model_from_path_ui,
+                    inputs=[model_file_selector],
+                    outputs=[model_selector, model_load_status]
+                )
+
+                # Refresh scalers file list
+                refresh_scalers_btn.click(
+                    fn=lambda: gr.update(choices=get_scalers_files()),
+                    outputs=[scalers_file_selector]
+                )
+
                 # Load scalers file
                 load_scalers_btn.click(
-                    fn=lambda f, m: load_scalers_file(f, m) if f else "❌ 请上传文件",
-                    inputs=[scalers_file, model_selector],
+                    fn=load_scalers_from_path,
+                    inputs=[scalers_file_selector, model_selector],
                     outputs=[scalers_load_status]
                 )
 
@@ -2381,10 +3127,11 @@ def create_unified_interface():
                         )
 
                 # Stage2Training函数
-                def train_stage2_ui(residual_data_key, d_model, nhead, num_layers, dropout,
-                                    epochs, batch_size, lr, weight_decay, grad_clip,
-                                    scheduler_patience, scheduler_factor,
-                                    test_size, val_size, progress=gr.Progress()):
+                def train_stage2_ui_generator(residual_data_key, d_model, nhead, num_layers, dropout,
+                                             epochs, batch_size, lr, weight_decay, grad_clip,
+                                             scheduler_patience, scheduler_factor,
+                                             test_size, val_size, progress=gr.Progress()):
+                    """Generator function for real-time log updates"""
 
                     config = {
                         'd_model': int(d_model),
@@ -2403,15 +3150,22 @@ def create_unified_interface():
                         'early_stop_patience': 25
                     }
 
-                    def progress_callback(msg):
-                        progress(0.5, desc="训练中...")
-                        return msg
+                    # Yield initial message
+                    yield "🚀 正在初始化Stage2训练...\n"
 
-                    status_msg, results = train_stage2_boost_model(
-                        residual_data_key, config, progress_callback
-                    )
+                    # Import here to avoid circular dependency
+                    import time
 
-                    return status_msg
+                    # Call training function and yield intermediate results
+                    try:
+                        # Run the training in a way that allows yielding
+                        # This is a workaround since train_stage2_boost_model is not a generator
+                        final_status = ""
+                        for update in train_stage2_boost_model_generator(residual_data_key, config, progress):
+                            yield update
+                            final_status = update
+                    except Exception as e:
+                        yield f"❌ 训练失败:\n{str(e)}\n\n{traceback.format_exc()}"
 
                 refresh_residual_btn_stage2.click(
                     fn=lambda: gr.update(choices=get_residual_data_keys()),
@@ -2419,7 +3173,7 @@ def create_unified_interface():
                 )
 
                 train_stage2_btn.click(
-                    fn=train_stage2_ui,
+                    fn=train_stage2_ui_generator,
                     inputs=[
                         residual_data_selector_stage2,
                         d_model_stage2, nhead_stage2, num_layers_stage2, dropout_stage2,
@@ -2433,8 +3187,14 @@ def create_unified_interface():
 
             # Tab 5: 综合推理模型生成
             with gr.Tab("🎯 综合推理模型", elem_id="ensemble_model"):
-                gr.Markdown("## 生成综合推理模型")
-                gr.Markdown("智能选择R²阈值，组合SST模型和Stage2模型生成综合预测")
+                gr.Markdown("## 生成综合推理模型 (Delta R² 策略)")
+                gr.Markdown("""
+                **优化后的策略**：
+                - 使用测试集数据评估每个信号的Delta R² = R²_ensemble - R²_stage1
+                - 只对Delta R² > 阈值的信号应用Stage2修正（说明Stage2确实能提升性能）
+                - 其余信号仅使用Stage1预测
+                - 自动生成所有信号的分析报告和CSV汇总文件
+                """)
 
                 with gr.Row():
                     with gr.Column(scale=1):
@@ -2449,11 +3209,11 @@ def create_unified_interface():
                         )
                         refresh_ensemble_btn = gr.Button("🔄 刷新", size="sm")
 
-                        gr.Markdown("### 🎚️ R²阈值设置")
-                        r2_threshold_slider = gr.Slider(
-                            0.0, 1.0, 0.4, 0.05,
-                            label="R²阈值",
-                            info="只对R² < 阈值的信号应用Stage2修正"
+                        gr.Markdown("### 🎚️ Delta R²阈值设置")
+                        delta_r2_threshold_slider = gr.Slider(
+                            0.0, 0.5, 0.05, 0.01,
+                            label="Delta R²阈值",
+                            info="只对Delta R² > 阈值的信号应用Stage2修正（0.05 = 5%提升）"
                         )
 
                         generate_ensemble_btn = gr.Button("🎯 生成综合模型", variant="primary", size="lg")
@@ -2466,14 +3226,21 @@ def create_unified_interface():
                             interactive=False
                         )
 
-                def generate_ensemble_ui(base_model_name, stage2_model_name, r2_threshold):
-                    if not base_model_name or not stage2_model_name:
-                        return "❌ 请选择基础模型和Stage2模型！"
-
-                    status_msg, ensemble_info = compute_signal_r2_and_select_threshold(
-                        base_model_name, stage2_model_name, r2_threshold
+                # 添加可视化输出
+                with gr.Row():
+                    ensemble_visualization = gr.Plot(
+                        label="综合模型分析可视化",
+                        show_label=True
                     )
-                    return status_msg
+
+                def generate_ensemble_ui(base_model_name, stage2_model_name, delta_r2_threshold):
+                    if not base_model_name or not stage2_model_name:
+                        return "❌ 请选择基础模型和Stage2模型！", None
+
+                    status_msg, ensemble_info, fig = compute_signal_r2_and_select_threshold(
+                        base_model_name, stage2_model_name, delta_r2_threshold
+                    )
+                    return status_msg, fig
 
                 refresh_ensemble_btn.click(
                     fn=lambda: (gr.update(choices=get_available_models()),
@@ -2483,8 +3250,8 @@ def create_unified_interface():
 
                 generate_ensemble_btn.click(
                     fn=generate_ensemble_ui,
-                    inputs=[base_model_selector, stage2_model_selector, r2_threshold_slider],
-                    outputs=[ensemble_status]
+                    inputs=[base_model_selector, stage2_model_selector, delta_r2_threshold_slider],
+                    outputs=[ensemble_status, ensemble_visualization]
                 )
 
             # Tab 6: 二次推理比较
