@@ -76,10 +76,6 @@ Traditional machine learning approaches treat sensors independently or use simpl
 - ✅ **Extensive Documentation**: Clear API documentation and usage examples
 - ✅ **Automated Model Management**: Intelligent model saving and loading with configurations
 
-### ⚠️ Deprecation Notice
-- **HybridSensorTransformer (HST)** has been removed in favor of the more effective Stage2 Boost approach
-- Old HST models are archived but no longer supported
-
 ## 📊 Use Cases
 
 This framework is ideal for:
@@ -492,15 +488,38 @@ If you use this work in your research, please cite:
 - [x] Inference comparison tools
 - [x] Enhanced Gradio interface
 
-### v2.0 (Upcoming)
-- [ ] Advanced residual analysis tools
-- [ ] Multi-stage boost (Stage3+)
-- [ ] Attention visualization
+### v2.0 (Upcoming) 🚀
+
+#### **Stage3 Temporal Boost System** 🕐
+The next evolution in our multi-stage architecture, focusing on pure temporal feature extraction:
+
+- **Stage3 Residual Temporal Modeling**: Train temporal sequence models on Stage1+Stage2 residuals
+  - Capture time-series patterns missed by spatial transformers
+  - Pure temporal feature extraction using LSTM/Temporal Transformers
+  - Final residual future prediction for time-series forecasting
+
+- **Complete Spatial-Temporal Decomposition Architecture**:
+  - **Stage1 (SST)**: Spatial sensor relationships and cross-sensor dependencies
+  - **Stage2 (Boost)**: Spatial residual correction and secondary spatial patterns
+  - **Stage3 (Temporal)**: Pure temporal features and time-series dynamics
+  - **Final Goal**: Separate spatial and temporal features into hierarchical layers, capturing all predictable patterns except irreducible noise for universal digital twin applications
+
+- **Hierarchical Feature Extraction Philosophy**:
+  - Layer 1: Primary spatial sensor correlations (SST)
+  - Layer 2: Residual spatial patterns (Stage2 Boost)
+  - Layer 3: Temporal dynamics and sequential dependencies (Stage3 Temporal)
+  - Residual: Irreducible stochastic noise (unpredictable component)
+
+This design aims to achieve **universal digital twin modeling** by systematically decomposing and capturing all predictable features across different domains.
+
+#### **Additional Features**
+- [ ] Advanced residual analysis and visualization tools
+- [ ] Attention mechanism visualization for interpretability
 - [ ] Real-time streaming data support
-- [ ] Docker containerization
-- [ ] REST API for model serving
-- [ ] Hyperparameter auto-tuning
-- [ ] Additional example datasets
+- [ ] Docker containerization for easy deployment
+- [ ] REST API for production model serving
+- [ ] Automated hyperparameter tuning
+- [ ] Additional benchmark datasets and examples
 
 ---
 
