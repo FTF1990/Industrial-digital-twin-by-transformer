@@ -15,10 +15,16 @@ This directory is used to store trained models, scalers, and inference configura
 Simply copy your trained model files into this directory:
 
 ```bash
+Stage1 models 
 saved_models/
 ├── my_sst_model.pth
 ├── my_sst_model_scalers.pkl
 └── my_sst_model_inference.json
+Stage2 models
+saved_models/stage2_boost
+├── my_stage2_model.pth
+├── my_stage2_scalers.pkl
+└── my_stage2_inference.json
 ```
 
 ### 2. Load in Gradio Interface
@@ -34,7 +40,7 @@ Three loading options:
 
 Steps:
 1. Open the Gradio interface
-2. Navigate to Tab 3 (🔬 残差提取)
+2. Navigate to Tab 3 (🔬 residual extraction)
 3. Click refresh buttons (🔄) to scan this folder
 4. Select files from dropdown menus
 5. Click load buttons (📥) to load
