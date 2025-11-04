@@ -66,6 +66,46 @@ Traditional machine learning approaches treat sensors independently or use simpl
 - R² scores displayed for each signal
 - Easy identification of model improvements
 
+### ⚡ Lightweight & Edge-Ready Architecture
+
+#### **Ultra-Lightweight Transformer Design**
+Despite being Transformer-based, our models are designed as **ultra-lightweight variants** that maintain exceptional performance while minimizing computational requirements:
+
+- **Edge Device Optimized**: Train and deploy on resource-constrained hardware
+- **Fast Inference**: Real-time predictions with minimal latency
+- **Low Memory Footprint**: Efficient model architecture for embedded systems
+- **Rapid Training**: Quick model convergence even on limited compute
+
+#### **Digital Twin Anything: Universal Edge Deployment** 🌐
+
+Our design philosophy enables **personalized digital twins for individual assets**:
+
+- **Per-Vehicle Digital Twins**: Dedicated models for each car or vehicle
+- **Per-Engine Monitoring**: Individual engine-specific predictive models
+- **Device-Level Customization**: Any system with sufficient testbench sensor data can have its own lightweight digital twin
+- **Automated Edge Pipeline**: Complete training and inference pipeline deployable on edge devices
+
+**Vision**: Create an automated, lightweight digital twin for **anything** - from individual machines to entire production lines, all running on edge hardware with continuous learning capabilities.
+
+#### **Future Potential: Simulation Model Surrogate** 🔬
+
+**Envisioned application for computational efficiency**:
+
+The lightweight nature of our Transformer architecture opens an exciting future possibility:
+- Treat each simulation mesh region as a virtual "sensor"
+- Potentially use lightweight Transformers to learn complex simulation behaviors
+- **Could reverse-engineer expensive simulations** with orders of magnitude less computational cost
+- May maintain high accuracy while enabling real-time simulation surrogate models
+- Promising for CFD, FEA, and other computationally intensive simulations
+
+This approach could unlock unprecedented possibilities:
+- Real-time simulation during design iterations
+- Democratizing access to high-fidelity simulations
+- Embedding complex physics models in edge devices
+- Accelerating digital twin development cycles
+
+*Note: This represents a theoretical framework and future research direction that has not yet been fully validated in production environments.*
+
 ### Additional Features
 
 - ✅ **Modular Design**: Easy to extend and customize
