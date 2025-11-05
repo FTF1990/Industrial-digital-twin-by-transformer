@@ -8,7 +8,7 @@
 
 > **An innovative Transformer-based framework for industrial digital twin modeling using sequential sensor outputs from complex systems with advanced residual boost training.**
 
-This project introduces novel Transformer architectures and residual boost training methodology specifically designed for predicting sensor outputs in industrial digital twin applications. Unlike traditional approaches, our models leverage the **sequential nature of multi-sensor systems** in complex industrial environments to achieve superior prediction accuracy through multi-stage refinement.
+This project introduces Transformer architectures and residual boost training methodology specifically designed for predicting sensor outputs in industrial digital twin applications. Unlike traditional approaches, our models leverage the **sequential nature of multi-sensor systems** in complex industrial environments to achieve improved prediction accuracy through multi-stage refinement.
 
 ---
 
@@ -18,7 +18,7 @@ This project introduces novel Transformer architectures and residual boost train
 
 ## 🌟 Key Innovation
 
-**Sequential Sensor Prediction using Transformers**: This is the first framework to apply Transformer architecture specifically to the problem of predicting sequential sensor outputs in industrial digital twins. The model treats multiple sensors as a sequence, capturing both spatial relationships between sensors and temporal dependencies in their measurements.
+**Sequential Sensor Prediction using Transformers**: This framework applies Transformer architecture to the problem of predicting sequential sensor outputs in industrial digital twins. The model treats multiple sensors as a sequence, capturing both spatial relationships between sensors and temporal dependencies in their measurements.
 
 ### Why This Matters
 
@@ -104,7 +104,7 @@ The lightweight nature of our Transformer architecture opens an exciting future 
 - May maintain high accuracy while enabling real-time simulation surrogate models
 - Promising for CFD, FEA, and other computationally intensive simulations
 
-This approach could unlock unprecedented possibilities:
+This approach could unlock new possibilities:
 - Real-time simulation during design iterations
 - Democratizing access to high-fidelity simulations
 - Embedding complex physics models in edge devices
