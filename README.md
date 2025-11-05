@@ -10,6 +10,12 @@
 
 This project introduces novel Transformer architectures and residual boost training methodology specifically designed for predicting sensor outputs in industrial digital twin applications. Unlike traditional approaches, our models leverage the **sequential nature of multi-sensor systems** in complex industrial environments to achieve superior prediction accuracy through multi-stage refinement.
 
+---
+
+**If you find this project helpful, please consider giving it a ⭐ star! Your support helps others discover this work and motivates continued development.**
+
+---
+
 ## 🌟 Key Innovation
 
 **Sequential Sensor Prediction using Transformers**: This is the first framework to apply Transformer architecture specifically to the problem of predicting sequential sensor outputs in industrial digital twins. The model treats multiple sensors as a sequence, capturing both spatial relationships between sensors and temporal dependencies in their measurements.
@@ -248,7 +254,7 @@ Step 4: Final Ensemble Model
 
 ```bash
 # Clone the repository
-!git clone https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer.git
+!git clone https://github.com/FTF1990/Industrial-digital-twin-by-transformer.git
 %cd Industrial-digital-twin-by-transformer
 
 # Install dependencies
@@ -259,7 +265,7 @@ Step 4: Final Ensemble Model
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer.git
+git clone https://github.com/FTF1990/Industrial-digital-twin-by-transformer.git
 cd Industrial-digital-twin-by-transformer
 
 # Create virtual environment (recommended)
@@ -294,7 +300,8 @@ This section demonstrates **basic Stage1 (SST) model training** for learning sen
 **Note**: The notebook provides a foundation for understanding the SST architecture and basic training process. For the complete Stage2 Boost training and ensemble model generation, please use the enhanced Gradio interface (Section 3).
 
 **Available Notebooks**:
-- `notebooks/transformer_boost_Leap_final.ipynb` - Advanced example with complete Stage1 + Stage2 training on LEAP dataset
+- `notebooks/Train and run model with demo data and your own data with gradio interface.ipynb` - Quick start tutorial for beginners
+- `notebooks/transformer_boost_Leap_final.ipynb` - Advanced example: Complete Stage1 + Stage2 training on LEAP dataset (Author's testing file, comments in Chinese)
 
 **Basic Training Example** (for your own data):
 
@@ -346,24 +353,7 @@ This notebook demonstrates:
 - Setting up the Gradio interface
 - Training with demo data or your own custom data
 
-#### **Quick Start with Demo Data**
-
-We provide demo sensor data in `data/raw/` directory with **pre-configured default input/output signal configurations**:
-
-```bash
-python gradio_sensor_transformer_app.py
-```
-
-**Using the Demo Data**:
-1. Launch the Gradio interface
-2. **Tab 1: Load Data**
-   - Click refresh button to update file list
-   - Select and load `data.csv` from the dropdown
-3. **Tab 2: Configure & Train**
-   - Click refresh button to update configuration file list
-   - Select and load the default input/output signal configuration file
-   - Select training parameters (we recommend trying default parameters first)
-   - Start Stage1 SST model training
+Simply follow the notebook steps to get started with the complete workflow.
 
 #### **Complete Workflow**
 
@@ -414,7 +404,8 @@ Industrial-digital-twin-by-transformer/
 │   ├── QUICKSTART.md          # 5-minute quick start
 │   └── FILE_MANIFEST.md       # File structure guide
 ├── notebooks/                  # Jupyter notebooks
-│   └── transformer_boost_Leap_final.ipynb  # Advanced Stage1+Stage2 tutorial with LEAP dataset
+│   ├── transformer_boost_Leap_final.ipynb  # Author's testing file on LEAP dataset (comments in Chinese)
+│   └── Train and run model with demo data and your own data with gradio interface.ipynb  # Quick start tutorial
 ├── data/                      # Data folder
 │   ├── raw/                   # Place your CSV files here
 │   └── residuals_*.csv       # Extracted residuals
@@ -484,31 +475,53 @@ for signal_idx in range(num_signals):
 
 ## 🎯 Performance
 
-### Benchmark Results (Example)
+### Benchmark Results
 
-On a typical industrial sensor dataset with 50 boundary sensors and 20 target sensors:
+**Status**: Performance benchmarks are currently in preparation.
 
-| Model | Average R² | Average MAE | Average RMSE | Training Time | Inference Time |
-|-------|-----------|------------|--------------|---------------|----------------|
-| **SST (Base)** | 0.92 | 2.34 | 3.45 | ~15 min | 0.5 ms/sample |
-| **SST + Stage2 (Ensemble)** | 0.96 | 1.87 | 2.76 | ~30 min | 0.8 ms/sample |
+We warmly welcome contributions from users across different industries! If you have applied this framework to your domain, we would greatly appreciate it if you could share:
+- **Anonymized/desensitized datasets** from your industrial applications
+- **Performance metrics** (R², MAE, RMSE, etc.)
+- **Use case descriptions** and insights
 
-**Performance Improvements with Stage2 Boost:**
-- MAE: 15-25% improvement
-- RMSE: 12-20% improvement
-- R²: Significant improvement for low-R² signals
+Your contributions will help build a comprehensive understanding of the framework's capabilities across diverse industrial scenarios.
 
-*Note: Results vary depending on dataset characteristics, R² threshold, and hardware.*
+**Preliminary Testing on LEAP Dataset**:
+
+For demonstration and reference purposes only, preliminary testing has been conducted on the LEAP atmospheric physics simulation dataset:
+- **Hardware**: Single NVIDIA A100 GPU (Google Colab)
+- Signals: 164 output signals (excluding ptend_q family)
+- No data augmentation applied
+- Stage1 (SST): R² ≈ 0.56
+- Stage2 Boost: R² ≈ 0.58
+
+*Note: These results are for testing and demonstration purposes only and are not intended for competitive benchmarking. Actual performance will vary based on dataset characteristics, signal complexity, model configuration, and application domain.*
+
+**Testing Notebook**: See `notebooks/transformer_boost_Leap_final.ipynb` (Author's testing file with comments in Chinese)
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+Thank you for your interest in this project! We truly value community engagement and feedback.
+
+**Ways to Support This Project**:
+- ⭐ **Give us a star!** It helps others discover this work and motivates continued development
+- 🐛 **Bug reports or suggestions?** Please feel free to open an [issue](https://github.com/FTF1990/Industrial-digital-twin-by-transformer/issues)
+- 💬 **Ideas or questions?** We welcome discussions in issues or comments
+- 📊 **Performance results?** Share your anonymized data and results - these are especially valuable!
+
+**Current Status**: Due to time constraints, the author may not be able to immediately review and merge external pull requests. We sincerely appreciate your understanding.
+
+**For major changes**: We kindly ask that you open an issue first to discuss your proposed changes before investing significant effort.
+
+⏱️ **Response time**: The author will respond as time permits. Your patience is greatly appreciated.
+
+Your understanding, patience, and contributions are greatly appreciated! 🙏
 
 ### Development Setup
 
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer.git
+git clone https://github.com/FTF1990/Industrial-digital-twin-by-transformer.git
 cd Industrial-digital-twin-by-transformer
 
 # Install in development mode
@@ -531,8 +544,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Contact
 
 For questions, issues, or collaborations:
-- **GitHub Issues**: [Create an issue](https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer/issues)
-- **Email**: your.email@example.com
+- **GitHub Issues**: [Create an issue](https://github.com/FTF1990/Industrial-digital-twin-by-transformer/issues)
+- **Email**: shvichenko11@gmail.com
 
 ## 🔗 Citation
 
@@ -540,10 +553,10 @@ If you use this work in your research, please cite:
 
 ```bibtex
 @software{industrial_digital_twin_transformer,
-  author = {Your Name},
+  author = {FTF1990},
   title = {Industrial Digital Twin by Transformer},
   year = {2025},
-  url = {https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer}
+  url = {https://github.com/FTF1990/Industrial-digital-twin-by-transformer}
 }
 ```
 
@@ -558,36 +571,39 @@ If you use this work in your research, please cite:
 
 ### v2.0 (Upcoming) 🚀
 
-#### **Stage3 Temporal Boost System** 🕐
-The next evolution in our multi-stage architecture, focusing on pure temporal feature extraction:
+#### **Stage3 Temporal Oscillation Enhancement System** 🕐
+The next evolution targeting temporal oscillation signal reconstruction:
 
-- **Stage3 Residual Temporal Modeling**: Train temporal sequence models on Stage1+Stage2 residuals
-  - Capture time-series patterns missed by spatial transformers
-  - Pure temporal feature extraction using LSTM/Temporal Transformers
-  - Final residual future prediction for time-series forecasting
+- **Stage3 Temporal Oscillation Feature Extraction**:
+  - Focus on signals with temporal oscillation characteristics (high-frequency pulsations, vibrations, etc.)
+  - Current spatial-sequence Transformers can only capture mean features of temporal oscillations, unable to reconstruct oscillation patterns
+  - Use temporal ML models or temporal Transformers for pure time-series feature extraction
+  - Enhance and restore temporal oscillation characteristics inherent to the signals themselves
+
+- **Final Residual Future Prediction**:
+  - After Stage1 + Stage2 + Stage3, the final residuals are primarily devoid of spatial features
+  - Enable pure time-series forecasting on final residuals for future timestep prediction
+  - Suitable for applications requiring forward prediction capabilities
+
+- **Signal Relationship Mask Editing** (Planned):
+  - Maximize Transformer flexibility with input-output signal relationship masks
+  - Apply engineering knowledge to mask non-directly-related factors
+  - Better reconstruct real system behaviors by incorporating domain expertise
+  - Enhance model accuracy through expert-guided feature relationships
 
 - **Complete Spatial-Temporal Decomposition Architecture**:
   - **Stage1 (SST)**: Spatial sensor relationships and cross-sensor dependencies
   - **Stage2 (Boost)**: Spatial residual correction and secondary spatial patterns
-  - **Stage3 (Temporal)**: Pure temporal features and time-series dynamics
+  - **Stage3 (Temporal)**: Pure temporal oscillation features and time-series dynamics
   - **Final Goal**: Separate spatial and temporal features into hierarchical layers, capturing all predictable patterns except irreducible noise for universal digital twin applications
 
 - **Hierarchical Feature Extraction Philosophy**:
   - Layer 1: Primary spatial sensor correlations (SST)
   - Layer 2: Residual spatial patterns (Stage2 Boost)
-  - Layer 3: Temporal dynamics and sequential dependencies (Stage3 Temporal)
-  - Residual: Irreducible stochastic noise (unpredictable component)
+  - Layer 3: Temporal oscillation characteristics (Stage3 Temporal)
+  - Final Residual: Irreducible stochastic noise + optional future prediction
 
 This design aims to achieve **universal digital twin modeling** by systematically decomposing and capturing all predictable features across different domains.
-
-#### **Additional Features**
-- [ ] Advanced residual analysis and visualization tools
-- [ ] Attention mechanism visualization for interpretability
-- [ ] Real-time streaming data support
-- [ ] Docker containerization for easy deployment
-- [ ] REST API for production model serving
-- [ ] Automated hyperparameter tuning
-- [ ] Additional benchmark datasets and examples
 
 ---
 
