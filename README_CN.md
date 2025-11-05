@@ -8,11 +8,17 @@
 
 > **一个创新的基于 Transformer 的框架，专为复杂系统中的工业数字孪生建模设计，使用序列传感器输出和先进的残差提升训练方法。**
 
-本项目引入了新颖的 Transformer 架构和残差提升训练方法，专门设计用于预测工业数字孪生应用中的传感器输出。与传统方法不同，我们的模型利用复杂工业环境中**多传感器系统的序列特性**，通过多阶段优化实现卓越的预测精度。
+本项目引入了 Transformer 架构和残差提升训练方法，专门设计用于预测工业数字孪生应用中的传感器输出。与传统方法不同，我们的模型利用复杂工业环境中**多传感器系统的序列特性**，通过多阶段优化实现更好的预测精度。
+
+---
+
+**如果您觉得这个项目有帮助，请考虑给它一个 ⭐ star！您的支持帮助更多人发现这项工作，并激励项目持续发展。**
+
+---
 
 ## 🌟 核心创新
 
-**使用 Transformer 进行序列传感器预测**：这是首个将 Transformer 架构专门应用于工业数字孪生中序列传感器输出预测问题的框架。该模型将多个传感器视为一个序列，捕获传感器之间的空间关系及其测量值的时间依赖性。
+**使用 Transformer 进行序列传感器预测**：这个框架将 Transformer 架构应用于工业数字孪生中序列传感器输出预测问题的框架。该模型将多个传感器视为一个序列，捕获传感器之间的空间关系及其测量值的时间依赖性。
 
 ### 为什么这很重要
 
@@ -69,7 +75,7 @@
 ### ⚡ 轻量化与边缘就绪架构
 
 #### **超轻量化 Transformer 设计**
-尽管基于 Transformer 架构，我们的模型被设计为**超轻量化变体**，在最小化计算需求的同时保持卓越性能：
+尽管基于 Transformer 架构，我们的模型被设计为**超轻量化变体**，在最小化计算需求的同时保持良好性能：
 
 - **边缘设备优化**：在资源受限的硬件上训练和部署
 - **快速推理**：实时预测，延迟极低
@@ -98,7 +104,7 @@
 - 有望在保持高精度的同时实现实时仿真代理模型
 - 对 CFD、FEA 等计算密集型仿真具有应用前景
 
-这一方法可能带来前所未有的应用场景：
+这一方法可能带来新的应用场景：
 - 设计迭代过程中的实时仿真
 - 普及高保真仿真的使用
 - 在边缘设备中嵌入复杂物理模型
@@ -249,7 +255,7 @@
 
 ```bash
 # 克隆仓库
-!git clone https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer.git
+!git clone https://github.com/FTF1990/Industrial-digital-twin-by-transformer.git
 %cd Industrial-digital-twin-by-transformer
 
 # 安装依赖
@@ -260,7 +266,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer.git
+git clone https://github.com/FTF1990/Industrial-digital-twin-by-transformer.git
 cd Industrial-digital-twin-by-transformer
 
 # 创建虚拟环境（推荐）
@@ -295,7 +301,8 @@ timestamp,sensor_1,sensor_2,sensor_3,...,sensor_n
 **注意**：Notebook 提供了理解 SST 架构和基础训练过程的基础。如需完整的 Stage2 提升训练和集成模型生成功能，请使用增强型 Gradio 界面（第3节）。
 
 **可用的 Notebooks**：
-- `notebooks/transformer_boost_Leap_final.ipynb` - 在 LEAP 数据集上的完整 Stage1 + Stage2 训练的高级示例
+- `notebooks/Train and run model with demo data and your own data with gradio interface.ipynb` - 初学者快速入门教程
+- `notebooks/transformer_boost_Leap_final.ipynb` - 高级示例：在 LEAP 数据集上的完整 Stage1 + Stage2 训练（作者测试文件，注释为中文）
 
 **基础训练示例**（用于您自己的数据）：
 
@@ -347,24 +354,7 @@ torch.save(model.state_dict(), 'saved_models/my_sst_model.pth')
 - 设置 Gradio 界面
 - 使用演示数据或您自己的自定义数据进行训练
 
-#### **使用演示数据快速开始**
-
-我们在 `data/raw/` 目录中提供了**预配置默认输入/输出信号配置**的演示传感器数据：
-
-```bash
-python gradio_sensor_transformer_app.py
-```
-
-**使用演示数据**：
-1. 启动 Gradio 界面
-2. **Tab 1: 加载数据**
-   - 点击刷新按钮更新文件列表
-   - 从下拉列表中选择并加载 `data.csv`
-3. **Tab 2: 配置与训练**
-   - 点击刷新按钮更新配置文件列表
-   - 选择并加载默认的输入/输出信号配置文件
-   - 选择训练参数（建议先尝试默认参数）
-   - 开始 Stage1 SST 模型训练
+只需按照 notebook 步骤操作即可开始使用完整工作流程。
 
 #### **完整工作流程**
 
@@ -415,7 +405,8 @@ Industrial-digital-twin-by-transformer/
 │   ├── QUICKSTART.md          # 5 分钟快速入门
 │   └── FILE_MANIFEST.md       # 文件结构指南
 ├── notebooks/                  # Jupyter notebooks
-│   └── transformer_boost_Leap_final.ipynb  # 使用 LEAP 数据集的高级 Stage1+Stage2 教程
+│   ├── transformer_boost_Leap_final.ipynb  # 作者在 LEAP 数据集上的测试文件（注释为中文）
+│   └── Train and run model with demo data and your own data with gradio interface.ipynb  # 快速入门教程
 ├── data/                      # 数据文件夹
 │   ├── raw/                   # 将您的 CSV 文件放在这里
 │   └── residuals_*.csv       # 提取的残差
@@ -485,31 +476,53 @@ for signal_idx in range(num_signals):
 
 ## 🎯 性能
 
-### 基准测试结果（示例）
+### 基准测试结果
 
-在典型的工业传感器数据集上，具有 50 个边界传感器和 20 个目标传感器：
+**状态**：性能基准测试目前正在准备中。
 
-| 模型 | 平均 R² | 平均 MAE | 平均 RMSE | 训练时间 | 推理时间 |
-|-------|-----------|------------|--------------|---------------|----------------|
-| **SST（基础）** | 0.92 | 2.34 | 3.45 | ~15 分钟 | 0.5 毫秒/样本 |
-| **SST + Stage2（集成）** | 0.96 | 1.87 | 2.76 | ~30 分钟 | 0.8 毫秒/样本 |
+我们热烈欢迎来自不同行业的用户贡献！如果您已将此框架应用于您的领域，我们将非常感谢您能分享：
+- 您工业应用中的**脱敏数据集**
+- **性能指标**（R²、MAE、RMSE 等）
+- **应用案例描述**和见解
 
-**Stage2 提升带来的性能改进：**
-- MAE：提高 15-25%
-- RMSE：提高 12-20%
-- R²：低 R² 信号显著改善
+您的贡献将有助于建立对框架在不同工业场景下能力的全面理解。
 
-*注意：结果因数据集特性、R² 阈值和硬件而异。*
+**LEAP 数据集初步测试**：
+
+仅供演示和参考，已在 LEAP 大气物理仿真数据集上进行了初步测试：
+- **硬件环境**：单卡 NVIDIA A100 GPU（Google Colab）
+- 信号数量：164 个输出信号（不包括 ptend_q 系列）
+- 未进行数据增强
+- Stage1 (SST)：R² ≈ 0.56
+- Stage2 Boost：R² ≈ 0.58
+
+*注：这些结果仅供测试演示参考，不用于结果竞赛对比。实际性能将根据数据集特性、信号复杂度、模型配置和应用领域而有所不同。*
+
+**测试 Notebook**：参见 `notebooks/transformer_boost_Leap_final.ipynb`（作者测试文件，注释为中文）
 
 ## 🤝 贡献
 
-欢迎贡献！请随时提交 Pull Request。对于重大更改，请先开启 issue 讨论您想要更改的内容。
+感谢您对本项目的关注！我们非常重视社区的参与和反馈。
+
+**支持本项目的方式**：
+- ⭐ **给我们一个 star！** 这有助于更多人发现这项工作，并激励项目持续发展
+- 🐛 **Bug 报告或建议？** 欢迎开启 [issue](https://github.com/FTF1990/Industrial-digital-twin-by-transformer/issues)
+- 💬 **想法或问题？** 欢迎在 issue 或评论中讨论
+- 📊 **性能结果？** 分享您的脱敏数据和结果 - 这些特别有价值！
+
+**当前状态**：由于时间限制，作者可能无法立即审查和合并外部的 Pull Request。衷心感谢您的理解。
+
+**对于重大更改**：恳请您先开启 issue 讨论您的提议，然后再投入大量精力。
+
+⏱️ **回复时间**：作者会在时间允许的情况下回复。非常感谢您的耐心。
+
+非常感谢您的理解、耐心和贡献！🙏
 
 ### 开发设置
 
 ```bash
 # 克隆仓库
-git clone https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer.git
+git clone https://github.com/FTF1990/Industrial-digital-twin-by-transformer.git
 cd Industrial-digital-twin-by-transformer
 
 # 以开发模式安装
@@ -532,8 +545,8 @@ python -m pytest tests/
 ## 📞 联系方式
 
 如有问题、议题或合作：
-- **GitHub Issues**：[创建 issue](https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer/issues)
-- **电子邮件**：your.email@example.com
+- **GitHub Issues**：[创建 issue](https://github.com/FTF1990/Industrial-digital-twin-by-transformer/issues)
+- **电子邮件**：shvichenko11@gmail.com
 
 ## 🔗 引用
 
@@ -541,10 +554,10 @@ python -m pytest tests/
 
 ```bibtex
 @software{industrial_digital_twin_transformer,
-  author = {Your Name},
+  author = {FTF1990},
   title = {Industrial Digital Twin by Transformer},
   year = {2025},
-  url = {https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer}
+  url = {https://github.com/FTF1990/Industrial-digital-twin-by-transformer}
 }
 ```
 
@@ -559,37 +572,39 @@ python -m pytest tests/
 
 ### v2.0（即将推出）🚀
 
-#### **Stage3 时序提升系统** 🕐
-多阶段架构的下一次演进，专注于纯时序特征提取：
+#### **Stage3 时序震荡增强系统** 🕐
+下一代演进目标：时序震荡信号重构
 
-- **Stage3 残差时序建模**：在 Stage1+Stage2 残差上训练时序模型
-  - 捕获空间 Transformer 遗漏的时间序列模式
-  - 使用 LSTM/时序 Transformer 进行纯时序特征提取
-  - 最终残差的未来纯时序预测
+- **Stage3 时序震荡特征提取**：
+  - 针对具有时序震荡特性的信号（高频脉动、振动等）
+  - 当前的空间序列 Transformer 对时序高频震荡信号只能提取均值特征，无法还原时序震荡特征
+  - 采用时序 ML 模型或时序 Transformer 进行纯时序特征提取
+  - 增强并还原信号本身固有的时序震荡特征
+
+- **最终残差未来预测**：
+  - 经过 Stage1 + Stage2 + Stage3 后，最终残差基本已不包含空间特征
+  - 可对最终残差进行纯时序预测，实现未来时间步预测
+  - 适用于需要前向预测能力的应用场景
+
+- **信号关联掩码编辑功能**（计划推出）：
+  - 最大限度利用 Transformer 的灵活性，编辑输入输出信号关联掩码
+  - 运用真实工程经验对不直接关联的要素之间施加掩码屏蔽
+  - 更好地还原真实系统行为，融入领域专家知识
+  - 通过专家引导的特征关系提高模型准确性
 
 - **完整的空间-时间分解架构**：
   - **Stage1 (SST)**：空间传感器关系和跨传感器依赖性
   - **Stage2 (Boost)**：空间残差修正和次级空间模式
-  - **Stage3 (Temporal)**：纯时序特征和时间序列动态
+  - **Stage3 (Temporal)**：纯时序震荡特征和时间序列动态
   - **最终目标**：将空间和时间特征完全剥离并分层预测，除不可预测的噪音特征外，捕捉所有可预测模式，实现场景泛用化的数字孪生
 
 - **分层特征提取哲学**：
   - 第一层：主要空间传感器相关性（SST）
   - 第二层：残差空间模式（Stage2 提升）
-  - 第三层：时间动态和序列依赖性（Stage3 时序）
-  - 残差：不可约随机噪声（不可预测成分）
+  - 第三层：时序震荡特征（Stage3 时序）
+  - 最终残差：不可约随机噪声 + 可选的未来预测
 
 此设计旨在通过系统性地分解和捕获不同领域的所有可预测特征，实现**通用数字孪生建模**。
-
-#### **附加功能**
-- [ ] 高级残差分析和可视化工具
-- [ ] 注意力机制可视化以提高可解释性
-- [ ] 实时流数据支持
-- [ ] Docker 容器化便于部署
-- [ ] 生产环境模型服务的 REST API
-- [ ] 自动化超参数调优
-- [ ] 额外的基准数据集和示例
-
 ---
 
 **为工业 AI 社区精心打造 ❤️**
