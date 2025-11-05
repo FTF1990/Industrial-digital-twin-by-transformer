@@ -66,6 +66,46 @@ Traditional machine learning approaches treat sensors independently or use simpl
 - R² scores displayed for each signal
 - Easy identification of model improvements
 
+### ⚡ Lightweight & Edge-Ready Architecture
+
+#### **Ultra-Lightweight Transformer Design**
+Despite being Transformer-based, our models are designed as **ultra-lightweight variants** that maintain exceptional performance while minimizing computational requirements:
+
+- **Edge Device Optimized**: Train and deploy on resource-constrained hardware
+- **Fast Inference**: Real-time predictions with minimal latency
+- **Low Memory Footprint**: Efficient model architecture for embedded systems
+- **Rapid Training**: Quick model convergence even on limited compute
+
+#### **Digital Twin Anything: Universal Edge Deployment** 🌐
+
+Our design philosophy enables **personalized digital twins for individual assets**:
+
+- **Per-Vehicle Digital Twins**: Dedicated models for each car or vehicle
+- **Per-Engine Monitoring**: Individual engine-specific predictive models
+- **Device-Level Customization**: Any system with sufficient testbench sensor data can have its own lightweight digital twin
+- **Automated Edge Pipeline**: Complete training and inference pipeline deployable on edge devices
+
+**Vision**: Create an automated, lightweight digital twin for **anything** - from individual machines to entire production lines, all running on edge hardware with continuous learning capabilities.
+
+#### **Future Potential: Simulation Model Surrogate** 🔬
+
+**Envisioned application for computational efficiency**:
+
+The lightweight nature of our Transformer architecture opens an exciting future possibility:
+- Treat each simulation mesh region as a virtual "sensor"
+- Potentially use lightweight Transformers to learn complex simulation behaviors
+- **Could reverse-engineer expensive simulations** with orders of magnitude less computational cost
+- May maintain high accuracy while enabling real-time simulation surrogate models
+- Promising for CFD, FEA, and other computationally intensive simulations
+
+This approach could unlock unprecedented possibilities:
+- Real-time simulation during design iterations
+- Democratizing access to high-fidelity simulations
+- Embedding complex physics models in edge devices
+- Accelerating digital twin development cycles
+
+*Note: This represents a theoretical framework and future research direction that has not yet been fully validated in production environments.*
+
 ### Additional Features
 
 - ✅ **Modular Design**: Easy to extend and customize
@@ -75,10 +115,6 @@ Traditional machine learning approaches treat sensors independently or use simpl
 - ✅ **Production Ready**: Exportable models for deployment
 - ✅ **Extensive Documentation**: Clear API documentation and usage examples
 - ✅ **Automated Model Management**: Intelligent model saving and loading with configurations
-
-### ⚠️ Deprecation Notice
-- **HybridSensorTransformer (HST)** has been removed in favor of the more effective Stage2 Boost approach
-- Old HST models are archived but no longer supported
 
 ## 📊 Use Cases
 
@@ -251,9 +287,16 @@ timestamp,sensor_1,sensor_2,sensor_3,...,sensor_n
 ...
 ```
 
-### 2. Train Using Jupyter Notebook
+### 2. Train Stage1 Model Using Jupyter Notebook (Basic Training)
 
-Open `notebooks/train_and_inference.ipynb` and follow the step-by-step tutorial:
+This section demonstrates **basic Stage1 (SST) model training** for learning sensor prediction fundamentals.
+
+**Note**: The notebook provides a foundation for understanding the SST architecture and basic training process. For the complete Stage2 Boost training and ensemble model generation, please use the enhanced Gradio interface (Section 3).
+
+**Available Notebooks**:
+- `notebooks/transformer_boost_Leap_final.ipynb` - Advanced example with complete Stage1 + Stage2 training on LEAP dataset
+
+**Basic Training Example** (for your own data):
 
 ```python
 from models.static_transformer import StaticSensorTransformer
@@ -270,7 +313,7 @@ target_signals = ['sensor_4', 'sensor_5']  # Outputs to predict
 # Prepare data
 data_splits = data_loader.prepare_data(boundary_signals, target_signals)
 
-# Create and train model
+# Create and train Stage1 SST model
 model = StaticSensorTransformer(
     num_boundary_sensors=len(boundary_signals),
     num_target_sensors=len(target_signals)
@@ -278,24 +321,41 @@ model = StaticSensorTransformer(
 
 trainer = ModelTrainer(model, device='cuda')
 history = trainer.train(train_loader, val_loader)
+
+# Save trained model
+torch.save(model.state_dict(), 'saved_models/my_sst_model.pth')
 ```
 
-### 3. Use Enhanced Gradio Interface (Interactive)
+**What you'll learn in Stage1**:
+- Loading and preprocessing sensor data
+- Configuring boundary and target sensors
+- Training the Static Sensor Transformer (SST)
+- Basic model evaluation and prediction
 
-Launch the enhanced interactive web interface with full residual boost training:
+**For complete functionality** (Stage2 Boost + Ensemble Models), proceed to Section 3.
+
+### 3. Use Enhanced Gradio Interface (Complete Stage1 + Stage2 Training)
+
+Launch the enhanced interactive web interface with **full Stage1 + Stage2 residual boost training**:
 
 ```bash
 python gradio_residual_tft_app.py
 ```
 
-The enhanced interface provides:
+The enhanced interface provides the **complete end-to-end workflow**:
 - 📊 **Data Loading**: Upload CSV or create example data
-- 🎯 **SST Model Training**: Configure and train base SST models
-- 🔬 **Residual Extraction**: Extract and analyze residuals from trained models
-- 🚀 **Stage2 Boost Training**: Train secondary models on residuals
-- 🎯 **Ensemble Model Generation**: Intelligent R² threshold-based model combination
-- 📊 **Inference Comparison**: Compare SST vs. ensemble model performance
+- 🎯 **Stage1 SST Training**: Configure and train base Static Sensor Transformer models
+- 🔬 **Residual Extraction**: Extract and analyze prediction errors from Stage1 models
+- 🚀 **Stage2 Boost Training**: Train secondary models on residuals for error correction
+- 🎯 **Ensemble Model Generation**: Intelligent Delta R² threshold-based model combination
+- 📊 **Inference Comparison**: Compare Stage1 SST vs. ensemble model performance with visualizations
 - 💾 **Export**: Automatic model saving with complete configurations
+
+**This is the recommended way to experience the full capabilities of the framework**, including:
+- Automated multi-stage training pipeline
+- Intelligent signal-wise Stage2 selection
+- Comprehensive performance metrics and visualizations
+- Production-ready ensemble model generation
 
 **Quick Start Guide**: See `docs/QUICKSTART.md` for a 5-minute tutorial
 
@@ -326,7 +386,7 @@ Industrial-digital-twin-by-transformer/
 │   ├── QUICKSTART.md          # 5-minute quick start
 │   └── FILE_MANIFEST.md       # File structure guide
 ├── notebooks/                  # Jupyter notebooks
-│   └── train_and_inference.ipynb  # Main tutorial
+│   └── transformer_boost_Leap_final.ipynb  # Advanced Stage1+Stage2 tutorial with LEAP dataset
 ├── data/                      # Data folder
 │   ├── raw/                   # Place your CSV files here
 │   └── residuals_*.csv       # Extracted residuals
@@ -468,15 +528,38 @@ If you use this work in your research, please cite:
 - [x] Inference comparison tools
 - [x] Enhanced Gradio interface
 
-### v2.0 (Upcoming)
-- [ ] Advanced residual analysis tools
-- [ ] Multi-stage boost (Stage3+)
-- [ ] Attention visualization
+### v2.0 (Upcoming) 🚀
+
+#### **Stage3 Temporal Boost System** 🕐
+The next evolution in our multi-stage architecture, focusing on pure temporal feature extraction:
+
+- **Stage3 Residual Temporal Modeling**: Train temporal sequence models on Stage1+Stage2 residuals
+  - Capture time-series patterns missed by spatial transformers
+  - Pure temporal feature extraction using LSTM/Temporal Transformers
+  - Final residual future prediction for time-series forecasting
+
+- **Complete Spatial-Temporal Decomposition Architecture**:
+  - **Stage1 (SST)**: Spatial sensor relationships and cross-sensor dependencies
+  - **Stage2 (Boost)**: Spatial residual correction and secondary spatial patterns
+  - **Stage3 (Temporal)**: Pure temporal features and time-series dynamics
+  - **Final Goal**: Separate spatial and temporal features into hierarchical layers, capturing all predictable patterns except irreducible noise for universal digital twin applications
+
+- **Hierarchical Feature Extraction Philosophy**:
+  - Layer 1: Primary spatial sensor correlations (SST)
+  - Layer 2: Residual spatial patterns (Stage2 Boost)
+  - Layer 3: Temporal dynamics and sequential dependencies (Stage3 Temporal)
+  - Residual: Irreducible stochastic noise (unpredictable component)
+
+This design aims to achieve **universal digital twin modeling** by systematically decomposing and capturing all predictable features across different domains.
+
+#### **Additional Features**
+- [ ] Advanced residual analysis and visualization tools
+- [ ] Attention mechanism visualization for interpretability
 - [ ] Real-time streaming data support
-- [ ] Docker containerization
-- [ ] REST API for model serving
-- [ ] Hyperparameter auto-tuning
-- [ ] Additional example datasets
+- [ ] Docker containerization for easy deployment
+- [ ] REST API for production model serving
+- [ ] Automated hyperparameter tuning
+- [ ] Additional benchmark datasets and examples
 
 ---
 

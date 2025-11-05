@@ -66,6 +66,46 @@
 - 每个信号显示 R² 分数
 - 轻松识别模型改进
 
+### ⚡ 轻量化与边缘就绪架构
+
+#### **超轻量化 Transformer 设计**
+尽管基于 Transformer 架构，我们的模型被设计为**超轻量化变体**，在最小化计算需求的同时保持卓越性能：
+
+- **边缘设备优化**：在资源受限的硬件上训练和部署
+- **快速推理**：实时预测，延迟极低
+- **低内存占用**：适用于嵌入式系统的高效模型架构
+- **快速训练**：即使在有限算力下也能快速收敛
+
+#### **Digital Twin Anything：通用边缘部署** 🌐
+
+我们的设计理念实现了**个性化的单体资产数字孪生**：
+
+- **单车数字孪生**：为每辆汽车建立专属模型
+- **单机监控**：为每台发动机建立个性化预测模型
+- **设备级定制**：任何在测试台架下有足够传感器数据的设备系统都可以拥有专属的轻量级数字孪生
+- **自动化边缘流程**：完整的训练和推理流程可部署在边缘设备上
+
+**愿景**：为**任何事物**创建自动化的轻量级数字孪生 - 从单个机器到整条生产线，全部运行在边缘硬件上并具备持续学习能力。
+
+#### **未来潜力：仿真模型代理** 🔬
+
+**面向计算效率的前瞻性应用展望**：
+
+我们轻量化 Transformer 架构的特性开启了一个令人兴奋的未来可能性：
+- 将仿真中的每个网格区域视为虚拟"传感器"
+- 有潜力使用轻量级 Transformer 学习复杂的仿真行为
+- **可能以极低算力逆向构建昂贵的仿真模型**，计算成本有望降低数个数量级
+- 有望在保持高精度的同时实现实时仿真代理模型
+- 对 CFD、FEA 等计算密集型仿真具有应用前景
+
+这一方法可能带来前所未有的应用场景：
+- 设计迭代过程中的实时仿真
+- 普及高保真仿真的使用
+- 在边缘设备中嵌入复杂物理模型
+- 加速数字孪生开发周期
+
+*注：这代表了一个理论框架和未来研究方向，尚未在生产环境中得到充分验证。*
+
 ### 附加功能
 
 - ✅ **模块化设计**：易于扩展和定制
@@ -75,10 +115,6 @@
 - ✅ **生产就绪**：可导出模型用于部署
 - ✅ **详尽的文档**：清晰的 API 文档和使用示例
 - ✅ **自动化模型管理**：智能模型保存和加载（含配置）
-
-### ⚠️ 弃用通知
-- **HybridSensorTransformer (HST)** 已被移除，采用更有效的 Stage2 提升方法
-- 旧的 HST 模型已归档但不再支持
 
 ## 📊 使用场景
 
@@ -252,9 +288,16 @@ timestamp,sensor_1,sensor_2,sensor_3,...,sensor_n
 ...
 ```
 
-### 2. 使用 Jupyter Notebook 训练
+### 2. 使用 Jupyter Notebook 训练 Stage1 模型（基础训练）
 
-打开 `notebooks/train_and_inference.ipynb` 并按照分步教程操作：
+本节演示**基础 Stage1 (SST) 模型训练**，用于学习传感器预测建模的基础知识。
+
+**注意**：Notebook 提供了理解 SST 架构和基础训练过程的基础。如需完整的 Stage2 提升训练和集成模型生成功能，请使用增强型 Gradio 界面（第3节）。
+
+**可用的 Notebooks**：
+- `notebooks/transformer_boost_Leap_final.ipynb` - 在 LEAP 数据集上的完整 Stage1 + Stage2 训练的高级示例
+
+**基础训练示例**（用于您自己的数据）：
 
 ```python
 from models.static_transformer import StaticSensorTransformer
@@ -271,7 +314,7 @@ target_signals = ['sensor_4', 'sensor_5']  # 要预测的输出
 # 准备数据
 data_splits = data_loader.prepare_data(boundary_signals, target_signals)
 
-# 创建和训练模型
+# 创建和训练 Stage1 SST 模型
 model = StaticSensorTransformer(
     num_boundary_sensors=len(boundary_signals),
     num_target_sensors=len(target_signals)
@@ -279,24 +322,41 @@ model = StaticSensorTransformer(
 
 trainer = ModelTrainer(model, device='cuda')
 history = trainer.train(train_loader, val_loader)
+
+# 保存训练好的模型
+torch.save(model.state_dict(), 'saved_models/my_sst_model.pth')
 ```
 
-### 3. 使用增强型 Gradio 界面（交互式）
+**在 Stage1 中您将学到**：
+- 加载和预处理传感器数据
+- 配置边界传感器和目标传感器
+- 训练静态传感器 Transformer (SST)
+- 基础模型评估和预测
 
-启动增强型交互式 Web 界面，提供完整的残差提升训练：
+**如需完整功能**（Stage2 提升 + 集成模型），请继续第3节。
+
+### 3. 使用增强型 Gradio 界面（完整 Stage1 + Stage2 训练）
+
+启动增强型交互式 Web 界面，提供**完整的 Stage1 + Stage2 残差提升训练**：
 
 ```bash
 python gradio_residual_tft_app.py
 ```
 
-增强型界面提供：
+增强型界面提供**完整的端到端工作流程**：
 - 📊 **数据加载**：上传 CSV 或创建示例数据
-- 🎯 **SST 模型训练**：配置和训练基础 SST 模型
-- 🔬 **残差提取**：从训练的模型中提取和分析残差
-- 🚀 **Stage2 提升训练**：在残差上训练第二阶段模型
+- 🎯 **Stage1 SST 训练**：配置和训练基础静态传感器 Transformer 模型
+- 🔬 **残差提取**：从 Stage1 模型中提取和分析预测误差
+- 🚀 **Stage2 提升训练**：在残差上训练第二阶段模型进行误差修正
 - 🎯 **集成模型生成**：基于智能 Delta R² 阈值的模型组合
-- 📊 **推理对比**：比较 SST vs. 集成模型性能
+- 📊 **推理对比**：比较 Stage1 SST vs. 集成模型性能并可视化
 - 💾 **导出**：自动模型保存（含完整配置）
+
+**这是体验框架完整功能的推荐方式**，包括：
+- 自动化多阶段训练流程
+- 智能的逐信号 Stage2 选择
+- 全面的性能指标和可视化
+- 生产就绪的集成模型生成
 
 **快速入门指南**：参见 `docs/QUICKSTART.md` 获取 5 分钟教程
 
@@ -327,7 +387,7 @@ Industrial-digital-twin-by-transformer/
 │   ├── QUICKSTART.md          # 5 分钟快速入门
 │   └── FILE_MANIFEST.md       # 文件结构指南
 ├── notebooks/                  # Jupyter notebooks
-│   └── train_and_inference.ipynb  # 主教程
+│   └── transformer_boost_Leap_final.ipynb  # 使用 LEAP 数据集的高级 Stage1+Stage2 教程
 ├── data/                      # 数据文件夹
 │   ├── raw/                   # 将您的 CSV 文件放在这里
 │   └── residuals_*.csv       # 提取的残差
@@ -469,15 +529,38 @@ python -m pytest tests/
 - [x] 推理对比工具
 - [x] 增强型 Gradio 界面
 
-### v2.0（即将推出）
-- [ ] 高级残差分析工具
-- [ ] 多阶段提升（Stage3+）
-- [ ] 注意力可视化
+### v2.0（即将推出）🚀
+
+#### **Stage3 时序提升系统** 🕐
+多阶段架构的下一次演进，专注于纯时序特征提取：
+
+- **Stage3 残差时序建模**：在 Stage1+Stage2 残差上训练时序模型
+  - 捕获空间 Transformer 遗漏的时间序列模式
+  - 使用 LSTM/时序 Transformer 进行纯时序特征提取
+  - 最终残差的未来纯时序预测
+
+- **完整的空间-时间分解架构**：
+  - **Stage1 (SST)**：空间传感器关系和跨传感器依赖性
+  - **Stage2 (Boost)**：空间残差修正和次级空间模式
+  - **Stage3 (Temporal)**：纯时序特征和时间序列动态
+  - **最终目标**：将空间和时间特征完全剥离并分层预测，除不可预测的噪音特征外，捕捉所有可预测模式，实现场景泛用化的数字孪生
+
+- **分层特征提取哲学**：
+  - 第一层：主要空间传感器相关性（SST）
+  - 第二层：残差空间模式（Stage2 提升）
+  - 第三层：时间动态和序列依赖性（Stage3 时序）
+  - 残差：不可约随机噪声（不可预测成分）
+
+此设计旨在通过系统性地分解和捕获不同领域的所有可预测特征，实现**通用数字孪生建模**。
+
+#### **附加功能**
+- [ ] 高级残差分析和可视化工具
+- [ ] 注意力机制可视化以提高可解释性
 - [ ] 实时流数据支持
-- [ ] Docker 容器化
-- [ ] 模型服务的 REST API
-- [ ] 超参数自动调优
-- [ ] 额外的示例数据集
+- [ ] Docker 容器化便于部署
+- [ ] 生产环境模型服务的 REST API
+- [ ] 自动化超参数调优
+- [ ] 额外的基准数据集和示例
 
 ---
 
