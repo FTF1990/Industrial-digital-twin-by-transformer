@@ -509,6 +509,16 @@ for signal_idx in range(num_signals):
 - **Hardware**: Single NVIDIA A100 GPU
 - **Training**: No data augmentation, no special tuning
 
+**Training Recommendations** (Based on Practical Experience):
+
+The above results were achieved with default hyperparameters. However, **better performance can typically be obtained** with the following parameter tuning strategy:
+- 📉 **Lower learning rate**: Smaller learning rates (e.g., 0.00003 vs. default 0.0001) often lead to better convergence
+- ⏱️ **Higher scheduler patience**: Increased learning rate scheduler patience (e.g., 8 vs. default 3) allows more stable training
+- 📊 **Higher decay factor**: Higher learning rate decay factors reduce aggressive learning rate reductions
+- 🔄 **More epochs**: Training for more epochs with the above settings generally improves final performance
+
+These adjustments help achieve smoother convergence and better generalization, especially for complex industrial sensor systems.
+
 **Stage2 Intelligent Selection**:
 - **36 signals** selected for Stage2 correction (significant improvement observed)
 - **53 signals** kept Stage1-only predictions (already performing well)

@@ -3371,13 +3371,13 @@ def create_unified_interface():
                             epochs_static = gr.Slider(10, 250, 50, 10, label="Training Epochs")
                             batch_size_static = gr.Slider(16, 2560, 512, 16, label="Batch size")
                         with gr.Row():
-                            lr_static = gr.Number(value=0.0001, label="Learning rate")
+                            lr_static = gr.Number(value=0.00003, label="Learning rate")
                             weight_decay_static = gr.Number(value=1e-5, label="Weight Decay")
 
                         gr.Markdown("### ⚙️ Optimizer Settings")
                         with gr.Row():
                             grad_clip_norm_static = gr.Slider(0.1, 5.0, 1.0, 0.1, label="Gradient Clipping")
-                            scheduler_patience_static = gr.Slider(1, 15, 3, 1, label="Learning Rate Scheduler Patience")
+                            scheduler_patience_static = gr.Slider(1, 15, 8, 1, label="Learning Rate Scheduler Patience")
                         scheduler_factor_static = gr.Slider(0.1, 0.9, 0.5, 0.1, label="Learning Rate Decay Factor")
 
                         gr.Markdown("### 🔀 Data split")
