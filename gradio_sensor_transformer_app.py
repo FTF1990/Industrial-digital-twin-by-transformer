@@ -681,6 +681,16 @@ def train_stage2_boost_model(
         target_signals = residual_info['target_signals']
         residual_signals = residual_info['residual_signals']
 
+        # Use Stage1's data split ratios (CRITICAL: ensures same test set as Stage1)
+        data_split_info = residual_info.get('data_split', {})
+        test_size = data_split_info.get('test_size', config.get('test_size', 0.15))
+        val_size = data_split_info.get('val_size', config.get('val_size', 0.15))
+
+        if 'data_split' in residual_info:
+            log_msg.append(f"\n✓ Using Stage1's data split ratios (test={test_size:.2f}, val={val_size:.2f})")
+        else:
+            log_msg.append(f"\n⚠️  Warning: Stage1 data split info not found, using config values")
+
         log_msg.append(f"\n📊 Data info:")
         log_msg.append(f"  Residual data: {residual_data_key}")
         log_msg.append(f"  Number of boundary signals: {len(boundary_signals)}")
@@ -691,17 +701,17 @@ def train_stage2_boost_model(
         X = residuals_df[boundary_signals].values
         y_residual = residuals_df[residual_signals].values
 
-        # Data split
-        train_size = int(len(X) * (1 - config['test_size'] - config['val_size']))
-        val_size = int(len(X) * config['val_size'])
+        # Data split (using Stage1's ratios)
+        train_size = int(len(X) * (1 - test_size - val_size))
+        val_size_samples = int(len(X) * val_size)
 
         X_train = X[:train_size]
-        X_val = X[train_size:train_size + val_size]
-        X_test = X[train_size + val_size:]
+        X_val = X[train_size:train_size + val_size_samples]
+        X_test = X[train_size + val_size_samples:]
 
         y_train = y_residual[:train_size]
-        y_val = y_residual[train_size:train_size + val_size]
-        y_test = y_residual[train_size + val_size:]
+        y_val = y_residual[train_size:train_size + val_size_samples]
+        y_test = y_residual[train_size + val_size_samples:]
 
         log_msg.append(f"\n🔀 Data split:")
         log_msg.append(f"  Training set: {len(X_train)} ({len(X_train) / len(X) * 100:.1f}%)")
@@ -875,7 +885,7 @@ def train_stage2_boost_model(
             else:
                 patience_counter += 1
 
-            # Progress output (增强版)
+            # Progress output (enhanced version)
             if (epoch + 1) % max(1, config['epochs'] // 20) == 0 or epoch == 0 or epoch == config['epochs'] - 1:
                 # Get current learning rate
                 current_lr = optimizer.param_groups[0]['lr']
@@ -1496,7 +1506,7 @@ def compute_signal_r2_and_select_threshold(
     Args:
         base_model_name: Base SST model name
         stage2_model_name: Stage2 residual model name
-        delta_r2_threshold: Delta R² Threshold (默认0.05，即5%提升)
+        delta_r2_threshold: Delta R² threshold (default 0.05, i.e., 5% improvement)
 
     Returns:
         status_msg: Status information
@@ -1527,7 +1537,7 @@ def compute_signal_r2_and_select_threshold(
         # Get residual data
         residual_data_key = stage2_model_info['residual_data_key']
 
-        # 如果原始Residual data does not exist，尝试使用任何可用的Residual data
+        # If original residual data does not exist, try to use any available residual data
         if residual_data_key not in global_state['residual_data']:
             available_residual_keys = list(global_state['residual_data'].keys())
             if not available_residual_keys:
@@ -1535,7 +1545,7 @@ def compute_signal_r2_and_select_threshold(
 
             # Use first available residual data
             residual_data_key = available_residual_keys[0]
-            log_msg.append(f"\n⚠️  原始Residual data does not exist，使用: {residual_data_key}")
+            log_msg.append(f"\n⚠️  Original residual data not found, using: {residual_data_key}")
 
         residuals_df = global_state['residual_data'][residual_data_key]['data']
         residual_info = global_state['residual_data'][residual_data_key]['info']
@@ -1558,20 +1568,22 @@ def compute_signal_r2_and_select_threshold(
         log_msg.append(f"  Number of target signals: {len(target_signals)}")
         log_msg.append(f"  Delta R² Threshold: {delta_r2_threshold:.3f} ({delta_r2_threshold*100:.1f}%)")
 
-        # Use same data split as Stage2 training to get test set
-        test_size = stage2_config.get('test_size', 0.2)
-        val_size = stage2_config.get('val_size', 0.1)
+        # CRITICAL: Use Stage1's data split (from residual_info) to ensure same test set
+        data_split_info = residual_info.get('data_split', {})
+        test_size = data_split_info.get('test_size', 0.15)
+        val_size = data_split_info.get('val_size', 0.15)
 
         total_size = len(residuals_df)
         train_size = int(total_size * (1 - test_size - val_size))
         val_size_actual = int(total_size * val_size)
         test_start_idx = train_size + val_size_actual
 
-        log_msg.append(f"\n🔀 Data split (evaluate on test set):")
+        log_msg.append(f"\n🔀 Data split (using Stage1's split ratios for fair comparison):")
         log_msg.append(f"  Total data: {total_size}")
         log_msg.append(f"  Training set: {train_size} ({train_size/total_size*100:.1f}%)")
         log_msg.append(f"  Validation set: {val_size_actual} ({val_size_actual/total_size*100:.1f}%)")
         log_msg.append(f"  Test set: {total_size - test_start_idx} ({(total_size - test_start_idx)/total_size*100:.1f}%)")
+        log_msg.append(f"  ✓ Same test set as Stage1 for R² comparability")
 
         # Extract test set data
         y_true_cols = [f"{sig}_true" for sig in target_signals]
@@ -1672,7 +1684,7 @@ def compute_signal_r2_and_select_threshold(
         log_msg.append(f"{'RMSE':<15} {rmse_stage1:>15.6f} {rmse_ensemble:>15.6f} {improvement_rmse:>14.2f}%")
         log_msg.append(f"{'R²':<15} {r2_stage1:>15.4f} {r2_ensemble:>15.4f} {improvement_r2:>14.2f}%")
 
-        # 保存Ensemble model information
+        # Save ensemble model information
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         ensemble_name = f"Ensemble_{base_model_name}_{timestamp}"
 
@@ -1766,7 +1778,7 @@ def compute_signal_r2_and_select_threshold(
         log_msg.append(f"  Config path: {config_path}")
         log_msg.append(f"  summaryCSV: {csv_path}")
 
-        # 生成Visualization chart
+        # Generate visualization chart
         fig = create_ensemble_visualization(ensemble_info)
 
         return "\n".join(log_msg), ensemble_info, fig
@@ -1855,10 +1867,10 @@ def load_csv_from_path(csv_path):
         signals: Available signals
     """
     if not csv_path or csv_path == "(no CSV files found)":
-        return "❌ 请Selection有效的CSV file", None, ""
+        return "❌ Please select a valid CSV file", None, ""
 
     if not os.path.exists(csv_path):
-        return f"❌ 文件does not exist: {csv_path}", None, ""
+        return f"❌ File does not exist: {csv_path}", None, ""
 
     try:
         df = pd.read_csv(csv_path)
@@ -1955,7 +1967,7 @@ def load_signals_config_from_json(json_file):
         target_signals = config.get('target_signals', [])
 
         if not boundary_signals or not target_signals:
-            return [], [], "❌ JSON file format error, missing 'boundary_signals' 或 'target_signals'"
+            return [], [], "❌ JSON file format error, missing 'boundary_signals' or 'target_signals'"
 
         status = f"✅ JSON config loaded successfully!\n\n"
         status += f"📥 Number of boundary signals: {len(boundary_signals)}\n"
@@ -2026,8 +2038,8 @@ def create_sample_data():
         status = f"✅ Sample data created successfully!\n\n"
         status += f"📊 Data dimensions: {df.shape}\n"
         status += f"📈 Number of samples: {len(df):,}\n"
-        status += f"🎯 Boundary signals: {n_boundary}个\n"
-        status += f"🎯 Target signals: {n_target}个\n\n"
+        status += f"🎯 Boundary signals: {n_boundary}\n"
+        status += f"🎯 Target signals: {n_target}\n\n"
         status += "💡 Tip: Sample data simulates nonlinear relationships between sensors"
 
         signals_display = f"Available Signals ({len(df.columns)}):\n" + ", ".join(df.columns.tolist())
@@ -2279,7 +2291,7 @@ def train_base_model_ui(
                 # Get current learning rate
                 current_lr = optimizer.param_groups[0]['lr']
 
-                # Calculate RMSE (更直观)
+                # Calculate RMSE (more intuitive)
                 train_rmse = np.sqrt(train_loss)
                 val_rmse = np.sqrt(val_loss)
 
@@ -2342,6 +2354,14 @@ def train_base_model_ui(
                     'num_layers': num_layers,
                     'dropout': dropout,
                     'batch_size': batch_size
+                },
+                'data_split': {
+                    'test_size': float(test_size),
+                    'val_size': float(val_size),
+                    'total_samples': len(X),
+                    'train_samples': len(X_train),
+                    'val_samples': len(X_val),
+                    'test_samples': len(X_test)
                 }
             },
             'training_history': history
@@ -2352,7 +2372,7 @@ def train_base_model_ui(
         with open(scaler_path, 'wb') as f:
             pickle.dump({'X': scaler_X, 'y': scaler_y}, f)
 
-        # 保存Inference config
+        # Save inference config
         save_inference_config(
             model_name, model_type, model_path, scaler_path,
             boundary_signals, target_signals,
@@ -2533,13 +2553,13 @@ def load_scalers_from_path(scaler_path, model_name):
     """
     try:
         if not scaler_path:
-            return "❌ 请Selectionscalers文件！"
+            return "❌ Please select a scalers file！"
 
         if not model_name:
-            return "❌ 请先Selection模型！"
+            return "❌ Please select a model first！"
 
         if not os.path.exists(scaler_path):
-            return f"❌ 文件does not exist: {scaler_path}"
+            return f"❌ File does not exist: {scaler_path}"
 
         # Load scalers from file
         with open(scaler_path, 'rb') as f:
@@ -2586,7 +2606,7 @@ def load_model_from_path(model_path):
             return None, "❌ Please select a model file！"
 
         if not os.path.exists(model_path):
-            return None, f"❌ 文件does not exist: {model_path}"
+            return None, f"❌ File does not exist: {model_path}"
 
         # Extract model name from path
         model_name = os.path.splitext(os.path.basename(model_path))[0]
@@ -2826,11 +2846,19 @@ def extract_residuals_ui(model_name):
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         residual_key = f"{model_name}_{timestamp}"
 
+        # Extract data_split info from model checkpoint
+        data_split_info = model_config.get('data_split', {
+            'test_size': 0.15,  # Default fallback
+            'val_size': 0.15,
+            'total_samples': len(residuals_df)
+        })
+
         info = {
             'base_model_name': model_name,
             'boundary_signals': boundary_signals,
             'target_signals': target_signals,
             'residual_signals': residual_cols,
+            'data_split': data_split_info,  # Save data split info for Stage2
             'metrics': {
                 'mae': float(mae),
                 'rmse': float(rmse),
@@ -2876,7 +2904,7 @@ def extract_residuals_ui(model_name):
         axes[0, 1].plot(residuals_df[residual_cols[0]].values[:1000])
         axes[0, 1].set_title(f'Residual Sequence ({residual_cols[0]})')
         axes[0, 1].set_xlabel('Index')
-        axes[0, 1].set_ylabel('残差')
+        axes[0, 1].set_ylabel('Residuals')
 
         # Residual Statistics
         residual_stats = residuals_df[residual_cols].describe()
@@ -2897,7 +2925,7 @@ def extract_residuals_ui(model_name):
 
         axes[1, 1].plot(y_true, label='True', alpha=0.7)
         axes[1, 1].plot(y_pred, label='Predicted', alpha=0.7)
-        axes[1, 1].set_title('预测 vs 真实 (First 1000 samples)')
+        axes[1, 1].set_title('Predicted vs Actual (First 1000 samples)')
         axes[1, 1].legend()
 
         plt.tight_layout()
@@ -2905,7 +2933,7 @@ def extract_residuals_ui(model_name):
         return "\n".join(log_msg), fig
 
     except Exception as e:
-        error_msg = f"❌ Residual Extraction失败:\n{str(e)}\n\n{traceback.format_exc()}"
+        error_msg = f"❌ Residual extraction failed:\n{str(e)}\n\n{traceback.format_exc()}"
         print(error_msg)
         return error_msg, None
 
@@ -3019,14 +3047,14 @@ def load_stage2_scalers(scaler_path, stage2_model_key):
     """
     try:
         if not scaler_path or not os.path.exists(scaler_path):
-            return "❌ 请Selection有效的Scaler文件！"
+            return "❌ Please select a valid scaler file！"
 
         if not stage2_model_key:
-            return "❌ 请先Selection一个Stage2 model！"
+            return "❌ Please select a Stage2 model first!"
 
         # Check if model exists
         if stage2_model_key not in global_state['stage2_models']:
-            return f"❌ 模型 {stage2_model_key} does not exist！请先加载Stage2 model。"
+            return f"❌ Model {stage2_model_key} does not exist! Please load Stage2 model first。"
 
         # Load scalers
         with open(scaler_path, 'rb') as f:
@@ -3060,7 +3088,7 @@ def load_stage2_from_inference_config(config_path):
     """
     try:
         if not config_path or not os.path.exists(config_path):
-            return None, "❌ 请Selection有效的Inference config文件！"
+            return None, "❌ Please select a valid inference config file！"
 
         with open(config_path, 'r') as f:
             config = json.load(f)
@@ -3302,7 +3330,7 @@ def create_unified_interface():
                     with gr.Column(scale=1):
                         gr.Markdown("### 🎛️ Signal Selection")
 
-                        # JSON配置加载
+                        # JSON config loading
                         with gr.Accordion("📁 Load Signal Config from JSON", open=False):
                             json_config_selector = gr.Dropdown(
                                 choices=get_available_json_configs(),
@@ -3423,7 +3451,7 @@ def create_unified_interface():
                         extract_btn = gr.Button("🔬 Extract Residuals（full dataset）", variant="primary", size="lg")
 
                     with gr.Column(scale=1):
-                        residual_status = gr.Textbox(label="Residual Extraction状态", lines=20, interactive=False)
+                        residual_status = gr.Textbox(label="Residual Extraction Status", lines=20, interactive=False)
                         residual_plot = gr.Plot(label="Residual Visualization")
 
                 # Event binding
@@ -3668,7 +3696,7 @@ def create_unified_interface():
                 # Add Visualization
                 with gr.Row():
                     ensemble_visualization = gr.Plot(
-                        label="Ensemble model分析Visualization",
+                        label="Ensemble Model Analysis Visualization",
                         show_label=True
                     )
 
@@ -3787,7 +3815,7 @@ def create_unified_interface():
                     try:
                         ensemble_info = global_state['ensemble_models'][ensemble_name]
 
-                        # 获取Prediction data
+                        # Get prediction data
                         y_true = ensemble_info['predictions']['y_true']
                         y_pred_base = ensemble_info['predictions']['y_pred_base']
                         y_pred_ensemble = ensemble_info['predictions']['y_pred_ensemble']
@@ -3798,7 +3826,7 @@ def create_unified_interface():
                         if not signal_names or len(signal_names) != num_signals:
                             signal_names = [f'Signal_{i+1}' for i in range(num_signals)]
 
-                        # 切片
+                        # Slicing
                         start_idx = max(0, int(start_idx))
                         end_idx = min(len(y_true), int(end_idx))
 
@@ -3814,7 +3842,7 @@ def create_unified_interface():
                         r2_base_overall, _ = compute_r2_safe(y_true_seg, y_pred_base_seg, method='per_output_mean')
                         r2_ensemble_overall, _ = compute_r2_safe(y_true_seg, y_pred_ensemble_seg, method='per_output_mean')
 
-                        # 计算每signals的R²
+                        # Calculate R² for each signal
                         r2_base_per_signal = []
                         r2_ensemble_per_signal = []
                         for i in range(num_signals):
@@ -4126,7 +4154,7 @@ def create_unified_interface():
             ]
         )
 
-        # JSON配置加载事件
+        # JSON config loading event
         def load_json_from_selector(json_path):
             """Load JSON config from dropdown selector"""
             if not json_path:
@@ -4161,7 +4189,7 @@ def create_unified_interface():
             outputs=[json_config_selector]
         )
 
-        # Training按钮绑定
+        # Training button binding
         train_btn_static.click(
             fn=train_base_model_ui,
             inputs=[
@@ -4176,7 +4204,7 @@ def create_unified_interface():
             outputs=[training_log_static]
         )
 
-        # Stop按钮绑定 - Tab2
+        # Stop button binding - Tab2
         def stop_training_tab2():
             global_state['stop_training_tab2'] = True
             return "⚠️  Stop after this epoch..."
@@ -4186,7 +4214,7 @@ def create_unified_interface():
             outputs=[training_log_static]
         )
 
-        # Stop按钮绑定 - Tab4
+        # Stop button binding - Tab4
         def stop_training_tab4():
             global_state['stop_training_tab4'] = True
             return "⚠️  Stop after this epoch..."
