@@ -492,20 +492,30 @@ for signal_idx in range(num_signals):
 - **Scale**: Full operational sensor suite covering critical parameters
 - **Quality**: Production-grade sensor measurements
 
-**Performance Results**:
+**Performance Results** (Stage1 SST):
 
-| Metric | Stage1 (SST Only) | Notes |
-|--------|-------------------|-------|
-| **R² Score** | **≥ 0.80** | Excellent prediction accuracy |
-| **Training** | No data augmentation | Out-of-the-box performance |
-| **Model** | StaticSensorTransformer | Lightweight architecture |
-| **Hardware** | Standard GPU | Fast training convergence |
+| Metric | Test Set | Validation Set | Notes |
+|--------|----------|----------------|-------|
+| **R² Score** | **0.8101** | 0.7699 | Excellent prediction accuracy |
+| **MAE** | 1.56 | 1.29 | Low mean absolute error |
+| **RMSE** | 3.89 | - | Root mean squared error |
+| **Training** | 50 epochs | No data augmentation | Out-of-the-box performance |
+| **Hardware** | Standard GPU | ~2 min/epoch | Fast training convergence |
+
+**Training Details**:
+- Best validation loss: 0.0983 (Epoch 47)
+- Final training loss: 0.0281
+- No hyperparameter fine-tuning required
+- Converged in < 50 epochs
 
 **Key Achievements**:
-- ✅ **Strong baseline performance**: R² > 0.8 with Stage1 SST alone
-- ✅ **Real-world applicability**: Demonstrates effectiveness on actual industrial data
+- ✅ **Strong baseline performance**: R² = 0.81 on held-out test set with Stage1 SST alone
+- ✅ **Real-world applicability**: Demonstrates effectiveness on actual industrial sensor data
 - ✅ **No special tuning required**: Robust performance without extensive hyperparameter optimization
+- ✅ **Fast training**: Practical training time on standard GPU hardware
 - ✅ **Production-ready**: Results validate the framework for industrial deployment
+
+**Trained Model**: [Available on Kaggle Models](https://www.kaggle.com/models) (coming soon)
 
 **Significance**:
 This case study demonstrates the framework's capability to model **complex sensor relationships in real industrial systems**, where multiple sensors exhibit intricate spatial and physical dependencies. The high R² score validates the Transformer-based sequential sensor modeling approach for industrial digital twin applications.
