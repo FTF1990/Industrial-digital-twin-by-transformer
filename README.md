@@ -343,6 +343,8 @@ torch.save(model.state_dict(), 'saved_models/my_sst_model.pth')
 
 ### 3. Use Enhanced Gradio Interface (Complete Stage1 + Stage2 Training)
 
+**Gradio UI Demo Video**: Coming soon
+
 #### **Getting Started with Jupyter Notebook Tutorial**
 
 For a step-by-step guide, see:
@@ -523,7 +525,11 @@ for signal_idx in range(num_signals):
 - ✅ **Real-world sensor data**: Demonstrates effectiveness on production equipment measurements
 - ✅ **Efficient training**: Both stages train quickly on standard hardware
 
-**Trained Models**: [Available on Kaggle Models](https://www.kaggle.com/models) (coming soon)
+**Trained Models**: [Available on Kaggle Models](https://www.kaggle.com/models/tianffan/industrial-digital-twin-by-transformer)
+
+**Model File Locations**:
+- **Stage1 Models**: Three files (`.pth`, `_config.json`, `_scaler.pkl`) are located in `saved_models/`
+- **Stage2 Models**: Located in `saved_models/stage2_boost/`
 
 **Note on Benchmarks**:
 These results are provided as reference examples on specific datasets. This project prioritizes **practical applicability and ease of deployment** over competitive benchmark scores. Performance will vary based on your specific industrial application, sensor characteristics, and data quality. We encourage users to evaluate the framework on their own use cases.

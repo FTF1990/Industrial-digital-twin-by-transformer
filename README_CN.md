@@ -344,6 +344,8 @@ torch.save(model.state_dict(), 'saved_models/my_sst_model.pth')
 
 ### 3. 使用增强型 Gradio 界面（完整 Stage1 + Stage2 训练）
 
+**Gradio UI 演示视频**：即将推出
+
 #### **Jupyter Notebook 入门教程**
 
 有关分步指南，请参阅：
@@ -524,7 +526,11 @@ for signal_idx in range(num_signals):
 - ✅ **真实传感器数据**：在生产设备测量数据上展示有效性
 - ✅ **高效训练**：两个阶段都能在标准硬件上快速训练
 
-**训练模型**：[Kaggle Models 提供](https://www.kaggle.com/models)（即将上线）
+**训练模型**：[Kaggle Models 提供](https://www.kaggle.com/models/tianffan/industrial-digital-twin-by-transformer)
+
+**模型文件位置**：
+- **Stage1 模型**：三个文件（`.pth`、`_config.json`、`_scaler.pkl`）位于 `saved_models/` 目录下
+- **Stage2 模型**：位于 `saved_models/stage2_boost/` 目录下
 
 **关于基准测试的说明**：
 这些结果作为特定数据集上的参考示例提供。本项目优先考虑**实用性和易部署性**，而非竞争性基准分数。性能将根据您的具体工业应用、传感器特性和数据质量而变化。我们鼓励用户在自己的应用场景中评估本框架。
