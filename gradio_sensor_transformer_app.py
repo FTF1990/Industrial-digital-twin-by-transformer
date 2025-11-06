@@ -2416,6 +2416,373 @@ def train_base_model_ui(
         return error_msg
 
 
+def train_base_model_ui_generator(
+        boundary_signals, target_signals, model_type,
+        epochs, batch_size, lr,
+        d_model, nhead, num_layers, dropout,
+        test_size, val_size,
+        weight_decay, scheduler_patience, scheduler_factor, grad_clip_norm,
+        temporal_signals=None, apply_smoothing=False,
+        progress=gr.Progress()
+):
+    """Generator version for real-time log updates during training"""
+    try:
+        if global_state['df'] is None:
+            yield "❌ Please load data first！"
+            return
+
+        if not boundary_signals or not target_signals:
+            yield "❌ Please select boundary signals and target signals！"
+            return
+
+        accumulated_log = ""
+
+        def log_and_yield(message):
+            """Helper function to accumulate and yield log messages"""
+            nonlocal accumulated_log
+            accumulated_log += message + "\n"
+            return accumulated_log
+
+        yield log_and_yield("=" * 80)
+        yield log_and_yield(f"🚀 Starting training {model_type}")
+        yield log_and_yield("=" * 80)
+        yield log_and_yield(f"\n📊 Training config:")
+        yield log_and_yield(f"  Model type: {model_type}")
+        yield log_and_yield(f"  Number of boundary signals: {len(boundary_signals)}")
+        yield log_and_yield(f"  Number of target signals: {len(target_signals)}")
+        yield log_and_yield(f"  Training epochs: {epochs}")
+        yield log_and_yield(f"  Batch size: {batch_size}")
+        yield log_and_yield(f"  Learning rate: {lr}")
+
+        df = global_state['df']
+
+        # Prepare data
+        X = df[boundary_signals].values
+        y = df[target_signals].values
+
+        # Apply IFD smoothing (if needed)
+        if apply_smoothing and temporal_signals:
+            yield log_and_yield(f"\n🔧 Applying IFD smoothing...")
+            # Apply smoothing to the full y array for specified temporal signals
+            y_smoothed = apply_ifd_smoothing(
+                y_data=y,
+                target_sensors=target_signals,
+                ifd_sensor_names=temporal_signals,
+                window_length=15,
+                polyorder=3
+            )
+            # Update y with smoothed values
+            y = y_smoothed
+            # Update df with smoothed target signals
+            for i, sig in enumerate(target_signals):
+                df[sig] = y[:, i]
+            yield log_and_yield(f"  Applied to {len(temporal_signals)} temporal signals with smoothing")
+
+        # Data split
+        train_size = int(len(X) * (1 - test_size - val_size))
+        val_size_samples = int(len(X) * val_size)
+
+        X_train = X[:train_size]
+        X_val = X[train_size:train_size + val_size_samples]
+        X_test = X[train_size + val_size_samples:]
+
+        y_train = y[:train_size]
+        y_val = y[train_size:train_size + val_size_samples]
+        y_test = y[train_size + val_size_samples:]
+
+        yield log_and_yield(f"\n🔀 Data split:")
+        yield log_and_yield(f"  Training set: {len(X_train)} ({len(X_train) / len(X) * 100:.1f}%)")
+        yield log_and_yield(f"  Validation set: {len(X_val)} ({len(X_val) / len(X) * 100:.1f}%)")
+        yield log_and_yield(f"  Test set: {len(X_test)} ({len(X_test) / len(X) * 100:.1f}%)")
+
+        # Data standardization
+        scaler_X = StandardScaler()
+        scaler_y = StandardScaler()
+
+        X_train_scaled = scaler_X.fit_transform(X_train)
+        X_val_scaled = scaler_X.transform(X_val)
+        X_test_scaled = scaler_X.transform(X_test)
+
+        y_train_scaled = scaler_y.fit_transform(y_train)
+        y_val_scaled = scaler_y.transform(y_val)
+        y_test_scaled = scaler_y.transform(y_test)
+
+        # Create DataLoader
+        train_dataset = torch.utils.data.TensorDataset(
+            torch.FloatTensor(X_train_scaled),
+            torch.FloatTensor(y_train_scaled)
+        )
+        val_dataset = torch.utils.data.TensorDataset(
+            torch.FloatTensor(X_val_scaled),
+            torch.FloatTensor(y_val_scaled)
+        )
+
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=True
+        )
+        val_loader = torch.utils.data.DataLoader(
+            val_dataset, batch_size=batch_size, shuffle=False
+        )
+
+        # Initialize model
+        yield log_and_yield(f"\n🏗️ Initializing model: {model_type}")
+
+        if model_type == 'StaticSensorTransformer':
+            model = StaticSensorTransformer(
+                num_boundary_sensors=len(boundary_signals),
+                num_target_sensors=len(target_signals),
+                d_model=d_model,
+                nhead=nhead,
+                num_layers=num_layers,
+                dropout=dropout
+            ).to(device)
+        else:
+            yield log_and_yield(f"❌ Unsupported model type: {model_type}")
+            return
+
+        # Optimizer
+        optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=scheduler_factor, patience=scheduler_patience
+        )
+        yield log_and_yield(f"📊 Optimizer: AdamW (lr={lr:.2e}, weight_decay={weight_decay:.2e})")
+        yield log_and_yield(f"📊 Learning rate scheduler: ReduceLROnPlateau (factor={scheduler_factor}, patience={scheduler_patience})")
+        yield log_and_yield(f"✂️ Gradient Clipping: {grad_clip_norm}")
+        criterion = nn.MSELoss()
+
+        # Mixed precision training
+        scaler = GradScaler()
+
+        # Training loop
+        yield log_and_yield(f"\n🎯 Starting training (mixed precision)...")
+        history = {
+            'train_losses': [],
+            'val_losses': [],
+            'train_r2': [],
+            'val_r2': [],
+            'train_mae': [],
+            'val_mae': []
+        }
+        best_val_loss = float('inf')
+        patience_counter = 0
+        early_stop_patience = 25
+
+        for epoch in range(epochs):
+            # Check if training should be stopped
+            if global_state['stop_training_tab2']:
+                yield log_and_yield(f"\n⚠️  Training stopped at Epoch {epoch+1}/{epochs} by user")
+                global_state['stop_training_tab2'] = False  # Reset flag
+                break
+
+            # Training with mixed precision
+            model.train()
+            train_loss = 0.0
+            train_preds = []
+            train_targets = []
+            for batch_X, batch_y in train_loader:
+                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+                optimizer.zero_grad()
+
+                # Mixed precision forward pass
+                with autocast():
+                    outputs = model(batch_X)
+                    loss = criterion(outputs, batch_y)
+
+                # Mixed precision backward pass
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+                scaler.step(optimizer)
+                scaler.update()
+
+                train_loss += loss.item()
+                train_preds.append(outputs.detach().cpu().numpy())
+                train_targets.append(batch_y.detach().cpu().numpy())
+
+            train_loss /= len(train_loader)
+
+            # Calculate training metrics
+            train_preds_arr = np.vstack(train_preds)
+            train_targets_arr = np.vstack(train_targets)
+
+            # Inverse transform to original space for metrics
+            train_preds_orig = scaler_y.inverse_transform(train_preds_arr)
+            train_targets_orig = scaler_y.inverse_transform(train_targets_arr)
+            train_r2, _ = compute_r2_safe(train_targets_orig, train_preds_orig, method='per_output_mean')
+            train_mae = mean_absolute_error(train_targets_orig, train_preds_orig)
+
+            # Validation with mixed precision
+            model.eval()
+            val_loss = 0.0
+            val_preds = []
+            val_targets = []
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+                    with autocast():
+                        outputs = model(batch_X)
+                        loss = criterion(outputs, batch_y)
+                    val_loss += loss.item()
+                    val_preds.append(outputs.cpu().numpy())
+                    val_targets.append(batch_y.cpu().numpy())
+
+            val_loss /= len(val_loader)
+
+            # Calculate validation metrics
+            val_preds_arr = np.vstack(val_preds)
+            val_targets_arr = np.vstack(val_targets)
+
+            # Inverse transform to original space for metrics
+            val_preds_orig = scaler_y.inverse_transform(val_preds_arr)
+            val_targets_orig = scaler_y.inverse_transform(val_targets_arr)
+            val_r2, _ = compute_r2_safe(val_targets_orig, val_preds_orig, method='per_output_mean')
+            val_mae = mean_absolute_error(val_targets_orig, val_preds_orig)
+
+            history['train_losses'].append(train_loss)
+            history['val_losses'].append(val_loss)
+            history['train_r2'].append(train_r2)
+            history['val_r2'].append(val_r2)
+            history['train_mae'].append(train_mae)
+            history['val_mae'].append(val_mae)
+
+            scheduler.step(val_loss)
+
+            # Early stopping
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                patience_counter = 0
+                best_model_state = model.state_dict().copy()
+            else:
+                patience_counter += 1
+
+            # Progress display (Enhanced - show MAE, RMSE, R2 and learning rate)
+            if (epoch + 1) % max(1, epochs // 20) == 0 or epoch == 0:
+                # Get current learning rate
+                current_lr = optimizer.param_groups[0]['lr']
+
+                # Calculate RMSE (more intuitive)
+                train_rmse = np.sqrt(train_loss)
+                val_rmse = np.sqrt(val_loss)
+
+                msg = f"\nEpoch {epoch + 1}/{epochs}"
+                msg += f"\n  📉 Train: Loss={train_loss:.4f}, RMSE={train_rmse:.4f}, MAE={train_mae:.4f}, R²={train_r2:.4f}"
+                msg += f"\n  📊 Val:   Loss={val_loss:.4f}, RMSE={val_rmse:.4f}, MAE={val_mae:.4f}, R²={val_r2:.4f}"
+                msg += f"\n  🎯 Val/Train Ratio: {val_loss/train_loss:.2f}x"
+                msg += f"\n  📚 LR: {current_lr:.2e}"
+
+                yield log_and_yield(msg)
+                progress((epoch + 1) / epochs, desc=f"Epoch {epoch+1}/{epochs} - Val R²: {val_r2:.4f}")
+
+            if patience_counter >= early_stop_patience:
+                yield log_and_yield(f"\n⏸️ Early stopping triggered (Epoch {epoch + 1})")
+                break
+
+        # Load best model
+        model.load_state_dict(best_model_state)
+
+        # Test set evaluation with mixed precision and batch inference
+        y_test_pred = batch_inference(
+            model, X_test, scaler_X, scaler_y, device,
+            batch_size=batch_size, model_name=model_type
+        )
+
+        test_mae = mean_absolute_error(y_test, y_test_pred)
+        test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
+        test_r2, _ = compute_r2_safe(y_test, y_test_pred, method='per_output_mean')
+
+        # Training history summary
+        yield log_and_yield(f"\n📈 Training history summary ({len(history['train_losses'])} epochs):")
+        yield log_and_yield(f"  Best validation loss: {best_val_loss:.4f} (Epoch {np.argmin(history['val_losses']) + 1})")
+        yield log_and_yield(f"  Best validation R²: {max(history['val_r2']):.4f} (Epoch {np.argmax(history['val_r2']) + 1})")
+        yield log_and_yield(f"  Best validation MAE: {min(history['val_mae']):.4f} (Epoch {np.argmin(history['val_mae']) + 1})")
+        yield log_and_yield(f"  Final training loss: {history['train_losses'][-1]:.4f}")
+        yield log_and_yield(f"  Final validation loss: {history['val_losses'][-1]:.4f}")
+
+        yield log_and_yield(f"\n📊 Test set performance:")
+        yield log_and_yield(f"  MAE: {test_mae:.6f}")
+        yield log_and_yield(f"  RMSE: {test_rmse:.6f}")
+        yield log_and_yield(f"  R²: {test_r2:.4f}")
+
+        # Save model
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        model_name = f"{model_type}_{timestamp}"
+
+        model_dir = "saved_models"
+        os.makedirs(model_dir, exist_ok=True)
+
+        model_path = os.path.join(model_dir, f"{model_name}.pth")
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'model_config': {
+                'type': model_type,
+                'boundary_signals': boundary_signals,
+                'target_signals': target_signals,
+                'config': {
+                    'd_model': d_model,
+                    'nhead': nhead,
+                    'num_layers': num_layers,
+                    'dropout': dropout,
+                    'batch_size': batch_size
+                },
+                'data_split': {
+                    'test_size': float(test_size),
+                    'val_size': float(val_size),
+                    'total_samples': len(X),
+                    'train_samples': len(X_train),
+                    'val_samples': len(X_val),
+                    'test_samples': len(X_test)
+                }
+            },
+            'training_history': history
+        }, model_path)
+
+        # Save scalers
+        scaler_path = os.path.join(model_dir, f"{model_name}_scalers.pkl")
+        with open(scaler_path, 'wb') as f:
+            pickle.dump({'X': scaler_X, 'y': scaler_y}, f)
+
+        # Save inference config
+        save_inference_config(
+            model_name, model_type, model_path, scaler_path,
+            boundary_signals, target_signals,
+            {
+                'd_model': d_model,
+                'nhead': nhead,
+                'num_layers': num_layers,
+                'dropout': dropout
+            }
+        )
+
+        # Save to global state
+        global_state['trained_models'][model_name] = {
+            'model': model,
+            'type': model_type,
+            'boundary_signals': boundary_signals,
+            'target_signals': target_signals,
+            'config': {
+                'd_model': d_model,
+                'nhead': nhead,
+                'num_layers': num_layers,
+                'dropout': dropout,
+                'batch_size': batch_size
+            },
+            'model_path': model_path,
+            'scaler_path': scaler_path
+        }
+
+        global_state['scalers'][model_name] = {'X': scaler_X, 'y': scaler_y}
+
+        yield log_and_yield(f"\n✅ Model training completed and saved:")
+        yield log_and_yield(f"  Model name: {model_name}")
+        yield log_and_yield(f"  Model path: {model_path}")
+        yield log_and_yield(f"  Scaler path: {scaler_path}")
+
+    except Exception as e:
+        error_msg = f"❌ Training failed:\n{str(e)}\n\n{traceback.format_exc()}"
+        print(error_msg)
+        yield error_msg
+
+
 # ============================================================================
 # Residual extraction functions
 
@@ -4191,7 +4558,7 @@ def create_unified_interface():
 
         # Training button binding
         train_btn_static.click(
-            fn=train_base_model_ui,
+            fn=train_base_model_ui_generator,
             inputs=[
                 boundary_signals_static, target_signals_static,
                 gr.Textbox(value="StaticSensorTransformer", visible=False),

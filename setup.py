@@ -6,12 +6,12 @@ with open("README.md", "r", encoding="utf-8") as fh:
 setup(
     name="industrial-digital-twin-transformer",
     version="1.0.0",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="FTF1990",
+    author_email="ftf1990@users.noreply.github.com",
     description="Transformer-based models for industrial digital twin sensor prediction",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/YOUR_USERNAME/Industrial-digital-twin-by-transformer",
+    url="https://github.com/FTF1990/Industrial-digital-twin-by-transformer",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 4 - Beta",
