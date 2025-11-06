@@ -529,6 +529,23 @@ These adjustments help achieve smoother convergence and better generalization, e
 - Temperature sensors: R² 0.35 → 0.59, 0.68 → 0.93 (moderate improvements)
 - Pressure sensors: R² 0.08 → 0.47, 0.42 → 0.63 (significant gains)
 
+<details>
+<summary><b>📊 Click to View Full Results Visualization (All Signals Prediction Performance)</b></summary>
+
+<br>
+
+The following image shows the prediction performance of all 89 target signals on the test set after Stage1 + Stage2 Boost:
+
+![All Signals Prediction Results Demo](saved_models/result_demo.webp)
+
+**Figure Description**:
+- Blue line: Ground Truth
+- Orange line: Model Prediction
+- Each subplot represents the prediction performance of one sensor signal
+- Most signals show predictions closely matching ground truth values
+
+</details>
+
 **Practical Insights**:
 - ✅ **Strong out-of-box baseline**: Stage1 achieves R² = 0.81 with default settings
 - ✅ **Refinement when needed**: Stage2 boost provides targeted improvements for challenging signals
