@@ -1,0 +1,149 @@
+========================================
+Hugging Face Spaces 部署文件清单
+========================================
+
+✅ 已创建的文件：
+
+1. app.py
+   - HF Spaces 入口文件
+   - 导入并启动 gradio_sensor_transformer_app
+   - 配置端口 7860 和 server_name="0.0.0.0"
+
+2. requirements_hf.txt
+   - 优化的依赖列表（用于 HF Spaces）
+   - 移除了不必要的包（jupyter等）
+   - 固定版本号确保稳定性
+
+3. README_HF_SPACES.md
+   - ⚠️ 重要：包含 HF Spaces YAML 配置
+   - 用户指南和使用说明
+   - 需要重命名为 README.md（或复制内容）
+
+4. .gitattributes
+   - Git LFS 配置
+   - 自动处理大文件（.pth, .pkl, .csv等）
+
+5. DEPLOYMENT_GUIDE.md
+   - 详细的中文部署指南
+   - 包含所有步骤和常见问题解决
+
+6. QUICK_DEPLOY_CN.md
+   - 快速部署指南（精简版）
+   - 三种部署方法
+
+7. deploy_to_hf.sh
+   - 自动化部署脚本
+   - 一键部署到 HF Spaces
+
+========================================
+部署所需文件结构（最小）：
+========================================
+
+YOUR_SPACE/
+├── README.md                           ← 重命名自 README_HF_SPACES.md
+├── requirements.txt                    ← 重命名自 requirements_hf.txt
+├── app.py                              ← ✅ 已创建
+├── .gitattributes                      ← ✅ 已创建
+├── gradio_sensor_transformer_app.py    ← ✅ 已存在
+│
+├── models/                             ← ✅ 已存在
+│   ├── __init__.py
+│   ├── static_transformer.py
+│   ├── residual_tft.py
+│   └── utils.py
+│
+├── src/                                ← ✅ 已存在
+│   ├── __init__.py
+│   ├── data_loader.py
+│   ├── trainer.py
+│   └── inference.py
+│
+├── saved_models/                       ← 【可选】您的模型
+│   └── (空目录，稍后上传模型)
+│
+└── data/                               ← 【可选】您的数据
+    └── (空目录，稍后上传数据)
+
+========================================
+下一步操作：
+========================================
+
+方法 A - 自动脚本部署：
+-----------------------
+1. 在 HF 创建 Space: https://huggingface.co/new-space
+   - 选择 SDK: Gradio
+
+2. 运行部署脚本：
+   $ ./deploy_to_hf.sh YOUR_USERNAME YOUR_SPACE_NAME
+
+方法 B - 手动部署：
+-------------------
+1. 克隆您的 HF Space：
+   $ git clone https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE
+   $ cd YOUR_SPACE
+
+2. 复制文件：
+   $ cp ../app.py ./
+   $ cp ../gradio_sensor_transformer_app.py ./
+   $ cp ../requirements_hf.txt ./requirements.txt
+   $ cp ../README_HF_SPACES.md ./README.md
+   $ cp ../.gitattributes ./
+   $ cp -r ../models ./
+   $ cp -r ../src ./
+   $ mkdir -p saved_models data
+
+3. 提交并推送：
+   $ git add .
+   $ git commit -m "Initial deployment"
+   $ git push
+
+方法 C - Web 界面上传：
+-----------------------
+1. 创建 Space 后，进入 Files and versions
+2. 上传所有必需文件
+3. 等待自动构建
+
+========================================
+上传模型和数据：
+========================================
+
+小文件（< 100MB）：
+------------------
+$ git add saved_models/your_model.pth
+$ git commit -m "Add model"
+$ git push
+
+大文件（> 100MB，需 Git LFS）：
+-------------------------------
+$ git lfs install
+$ git lfs track "*.pth"
+$ git add saved_models/large_model.pth
+$ git commit -m "Add large model"
+$ git push
+
+超大文件（> 5GB）：
+-------------------
+$ huggingface-cli upload USERNAME/SPACE_NAME \
+    ./saved_models/huge.pth \
+    saved_models/huge.pth
+
+========================================
+重要提示：
+========================================
+
+⚠️  README.md 必须包含 YAML 配置：
+---
+title: Industrial Digital Twin
+sdk: gradio
+sdk_version: 4.8.0
+app_file: app.py
+---
+
+⚠️  app.py 必须配置正确的端口：
+server_name="0.0.0.0"
+server_port=7860
+
+⚠️  大文件必须使用 Git LFS
+查看: .gitattributes
+
+========================================
