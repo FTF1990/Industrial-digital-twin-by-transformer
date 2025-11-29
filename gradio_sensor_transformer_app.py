@@ -4599,6 +4599,7 @@ def create_unified_interface():
 
 if __name__ == "__main__":
     import sys
+    import os
 
     print("Starting Industrial Digital Twin Residual Boost Training System...")
     print("="*80)
@@ -4615,31 +4616,84 @@ if __name__ == "__main__":
     try:
         import google.colab
         IN_COLAB = True
-        print("✅ colab confirmed")
+        print("✅ Colab confirmed")
     except:
         IN_COLAB = False
-        print("✅ local confirmed")
+        print("✅ Local confirmed")
 
+    # Build UI
     demo = create_unified_interface()
     print("✅ UI built")
     print("="*80)
 
+    # Launch based on environment
     if IN_COLAB:
-        # Colab environment - use share=True for public URL
-        print("\n🌐 Start gradio in colab...")
-        print("📝 note：Gradio will generate a public link")
-        demo.launch(
-            share=True,
-            debug=True,
-            show_error=True,
-            inline=False  # Use separate window
+        # Colab environment - use Cloudflare Tunnel
+        print("\n🌐 Launching in Colab...")
+        print("📝 Installing Cloudflare Tunnel...")
+        
+        import subprocess
+        import threading
+        import time
+        
+        # 安装 cloudflared
+        subprocess.run([
+            "wget", "-q",
+            "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64",
+            "-O", "cloudflared"
+        ], check=True)
+        subprocess.run(["chmod", "+x", "cloudflared"], check=True)
+        
+        print("🚀 Starting Gradio server...")
+        
+        # 后台启动 Gradio
+        def start_gradio():
+            demo.launch(
+                share=False,
+                server_port=7860,
+                server_name="0.0.0.0",
+                debug=True,
+                show_error=True,
+                prevent_thread_lock=False
+            )
+        
+        gradio_thread = threading.Thread(target=start_gradio, daemon=True)
+        gradio_thread.start()
+        
+        # 等待服务器启动
+        print("⏳ Waiting for server to start...")
+        time.sleep(5)
+        
+        # 启动 Cloudflare Tunnel
+        print("🔗 Creating Cloudflare Tunnel...")
+        print("📌 Your public URL will appear below:\n")
+        
+        # 运行 cloudflared (会自动显示公网链接)
+        tunnel_process = subprocess.Popen(
+            ["./cloudflared", "tunnel", "--url", "http://localhost:7860"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
         )
+        
+        # 读取并打印 URL
+        url_found = False
+        for line in tunnel_process.stdout:
+            print(line.strip())
+            if "trycloudflare.com" in line and not url_found:
+                print("\n" + "="*80)
+                print("✅ Application is ready!")
+                print("📌 Use the URL above to access your application")
+                print("="*80 + "\n")
+                url_found = True
+        
     else:
         # Local environment - try multiple ports
-        print("\n🌐 Run gradio locally...")
+        print("\n🌐 Running locally...")
+        
         for port in range(7860, 7870):
             try:
-                print(f"try {port}...")
+                print(f"Trying port {port}...")
                 demo.launch(
                     server_name="127.0.0.1",
                     server_port=port,
@@ -4648,12 +4702,13 @@ if __name__ == "__main__":
                     show_error=True,
                     quiet=False
                 )
-                print(f"✅ Service Started！")
-                print(f"🔗 Address: http://localhost:{port}")
+                print(f"\n✅ Service started!")
+                print(f"🔗 Local URL: http://localhost:{port}")
                 print("="*80)
                 break
             except OSError:
-                print(f"⚠️  port {port} was not available，try next...")
+                print(f"⚠️ Port {port} not available, trying next...")
                 continue
         else:
-            print("❌ no available port (7860-7869)")
+            print("❌ No available port (7860-7869)")
+
