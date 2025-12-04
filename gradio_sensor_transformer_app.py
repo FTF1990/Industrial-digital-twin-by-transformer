@@ -4595,6 +4595,22 @@ def create_unified_interface():
 
 
 # ============================================================================
+# ============================================================================
+# 🔑 Ngrok Token Configuration
+# ============================================================================
+
+# ⭐ 直接设置你的 ngrok token (替换下面的值)
+NGROK_TOKEN = "YOUR_NGROK_TOKEN_HERE"  # 👈 把这里替换成你的真实 token
+
+# 检测环境
+try:
+    import google.colab
+    IN_COLAB = True
+except:
+    IN_COLAB = False
+
+
+# ============================================================================
 # Launch application
 
 if __name__ == "__main__":
@@ -4612,13 +4628,10 @@ if __name__ == "__main__":
     os.makedirs("saved_models/residuals_data", exist_ok=True)
     print("✅ Created necessary model save directories")
 
-    # Check if running in Colab
-    try:
-        import google.colab
-        IN_COLAB = True
+    # Check environment
+    if IN_COLAB:
         print("✅ Colab confirmed")
-    except:
-        IN_COLAB = False
+    else:
         print("✅ Local confirmed")
 
     # Build UI
@@ -4628,21 +4641,38 @@ if __name__ == "__main__":
 
     # Launch based on environment
     if IN_COLAB:
-        # Colab environment - use Cloudflare Tunnel
+        # Colab environment - use ngrok
         print("\n🌐 Launching in Colab...")
-        print("📝 Installing Cloudflare Tunnel...")
         
-        import subprocess
         import threading
         import time
+        import requests
         
-        # 安装 cloudflared
-        subprocess.run([
-            "wget", "-q",
-            "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64",
-            "-O", "cloudflared"
-        ], check=True)
-        subprocess.run(["chmod", "+x", "cloudflared"], check=True)
+        # 导入 pyngrok
+        try:
+            from pyngrok import ngrok
+            print("✅ Pyngrok imported")
+        except ImportError:
+            print("📝 Installing pyngrok...")
+            import subprocess
+            subprocess.run(["pip", "install", "pyngrok", "-q"], check=True)
+            from pyngrok import ngrok
+            print("✅ Pyngrok installed")
+        
+        # 检查 token
+        if NGROK_TOKEN == "YOUR_NGROK_TOKEN_HERE":
+            print("\n" + "="*80)
+            print("⚠️  WARNING: Please set your ngrok token!")
+            print("\n📝 Steps:")
+            print("   1. Get token: https://dashboard.ngrok.com/get-started/your-authtoken")
+            print("   2. Replace 'YOUR_NGROK_TOKEN_HERE' in line ~4607")
+            print("   3. Re-run this cell")
+            print("="*80)
+            raise ValueError("Ngrok token not configured")
+        
+        # 设置 authtoken
+        ngrok.set_auth_token(NGROK_TOKEN)
+        print("✅ Ngrok token configured")
         
         print("🚀 Starting Gradio server...")
         
@@ -4660,35 +4690,62 @@ if __name__ == "__main__":
         gradio_thread = threading.Thread(target=start_gradio, daemon=True)
         gradio_thread.start()
         
-        # 等待服务器启动
-        print("⏳ Waiting for server to start...")
-        time.sleep(5)
+        # 等待并验证 Gradio 启动
+        print("⏳ Waiting for Gradio to be ready...")
+        max_retries = 20
+        gradio_ready = False
         
-        # 启动 Cloudflare Tunnel
-        print("🔗 Creating Cloudflare Tunnel...")
-        print("📌 Your public URL will appear below:\n")
+        for i in range(max_retries):
+            try:
+                response = requests.get("http://localhost:7860", timeout=2)
+                if response.status_code == 200:
+                    print(f"✅ Gradio is ready! (took {i+1} attempts)")
+                    gradio_ready = True
+                    break
+            except:
+                if i % 3 == 0:
+                    print(f"   Waiting... ({i+1}/{max_retries})")
+            time.sleep(1)
         
-        # 运行 cloudflared (会自动显示公网链接)
-        tunnel_process = subprocess.Popen(
-            ["./cloudflared", "tunnel", "--url", "http://localhost:7860"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
-        )
+        if not gradio_ready:
+            print("⚠️ Could not verify Gradio, but continuing...")
         
-        # 读取并打印 URL
-        url_found = False
-        for line in tunnel_process.stdout:
-            print(line.strip())
-            if "trycloudflare.com" in line and not url_found:
-                print("\n" + "="*80)
-                print("✅ Application is ready!")
-                print("📌 Use the URL above to access your application")
-                print("="*80 + "\n")
-                url_found = True
+        time.sleep(2)
+        
+        # 创建 ngrok 隧道
+        print("\n🔗 Creating ngrok tunnel...")
+        
+        try:
+            public_url = ngrok.connect(7860)
+            
+            print("\n" + "="*80)
+            print("✅ Tunnel Created Successfully!")
+            print(f"🌍 Public URL: {public_url}")
+            print("\n⏳ Initializing tunnel... please wait 10 seconds")
+            print("="*80)
+            
+            for i in range(10, 0, -1):
+                print(f"\r   Countdown: {i} seconds...", end="", flush=True)
+                time.sleep(1)
+            
+            print("\n\n" + "="*80)
+            print("✅ Ready! You can now access the application")
+            print(f"🔗 Click here: {public_url}")
+            print("📌 This link is valid for 2 hours (ngrok free tier)")
+            print("="*80)
+            
+            try:
+                gradio_thread.join()
+            except KeyboardInterrupt:
+                print("\n👋 Shutting down...")
+                ngrok.disconnect(public_url)
+                
+        except Exception as e:
+            print(f"\n❌ Failed to create ngrok tunnel: {e}")
+            print("📌 Please check your authtoken and internet connection")
         
     else:
-        # Local environment - try multiple ports
+        # Local environment
         print("\n🌐 Running locally...")
         
         for port in range(7860, 7870):
