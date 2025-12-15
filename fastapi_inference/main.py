@@ -20,7 +20,7 @@ from .config import (
     ALLOW_METHODS,
     ALLOW_HEADERS
 )
-from .api import models, ensemble, inference
+from .api import models, ensemble, inference, streaming
 
 # Create FastAPI app
 app = FastAPI(
@@ -45,6 +45,7 @@ app.add_middleware(
 app.include_router(models.router)
 app.include_router(ensemble.router)
 app.include_router(inference.router)
+app.include_router(streaming.router)
 
 
 @app.get("/", include_in_schema=False)
@@ -64,6 +65,7 @@ async def api_info():
             "models": "/api/v1/models",
             "ensemble": "/api/v1/ensemble",
             "inference": "/api/v1/inference",
+            "streaming": "/api/v1/inference/stream",
             "health": "/api/v1/health"
         },
         "documentation": {
@@ -76,9 +78,9 @@ async def api_info():
 def main():
     """Run the application"""
     print("=" * 80)
-    print(f"=€ Starting {API_TITLE}")
-    print(f"=á Server: http://{HOST}:{PORT}")
-    print(f"=Ö Docs: http://{HOST}:{PORT}/docs")
+    print(f"=ï¿½ Starting {API_TITLE}")
+    print(f"=ï¿½ Server: http://{HOST}:{PORT}")
+    print(f"=ï¿½ Docs: http://{HOST}:{PORT}/docs")
     print("=" * 80)
 
     uvicorn.run(

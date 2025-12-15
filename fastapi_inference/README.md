@@ -326,3 +326,74 @@ https://github.com/FTF1990/Industrial-digital-twin-by-transformer/issues
 ## 📝 License
 
 MIT License
+
+## 🌊 流式推理 (WebSocket)
+
+### 新功能：实时流式推理
+
+FastAPI 服务现在支持通过 WebSocket 进行实时流式推理！
+
+#### 特性
+
+- ✅ **实时推理**: 低延迟（10-20ms）
+- ✅ **双向通信**: WebSocket 双向实时通信
+- ✅ **两种模式**: 单条模式 + 批量模式
+- ✅ **统计信息**: 实时监控连接和性能
+- ✅ **历史保存**: 保存推理历史到文件
+
+#### 快速开始
+
+```python
+import asyncio
+import websockets
+import json
+
+async def stream_inference():
+    uri = "ws://localhost:8000/api/v1/inference/stream"
+    
+    async with websockets.connect(uri) as ws:
+        # 配置
+        await ws.send(json.dumps({
+            "type": "config",
+            "data": {
+                "ensemble_name": "Ensemble_your_model_20251215_103000",
+                "mode": "single"
+            }
+        }))
+        await ws.recv()  # 接收确认
+        
+        # 发送数据并获取预测
+        await ws.send(json.dumps({
+            "type": "predict",
+            "data": {
+                "boundary_signals": {
+                    "Temperature_boundary_1": 23.5,
+                    "Pressure_boundary_1": 101.3,
+                    # ...
+                }
+            }
+        }))
+        
+        result = json.loads(await ws.recv())
+        print(result['data']['predictions'])
+
+asyncio.run(stream_inference())
+```
+
+#### 完整文档
+
+详见 **[流式推理文档](STREAMING.md)**
+
+#### Demo 客户端
+
+```bash
+# 运行流式推理 Demo
+python fastapi_inference/tests/demo_stream_client.py
+```
+
+#### API 端点
+
+- **WebSocket**: `ws://localhost:8000/api/v1/inference/stream`
+- **统计信息**: `GET /api/v1/inference/stream/stats`
+- **保存历史**: `POST /api/v1/inference/stream/save`
+
