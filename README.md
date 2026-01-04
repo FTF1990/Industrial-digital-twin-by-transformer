@@ -474,7 +474,64 @@ If you use this work in your research, please cite:
 - [x] Inference comparison tools
 - [x] Enhanced Gradio interface
 
-### v2.0 (Upcoming) 🚀
+### v2.0 (Current) ✅
+
+#### **Inverse Control Optimization System** 🎯
+Gradient-based inverse optimization for control parameter tuning:
+
+- **Gradient-Based Inverse Optimizer**:
+  - Freeze trained model parameters (model as digital twin)
+  - Optimize input boundary conditions using gradient descent
+  - Achieve target outputs by adjusting controllable inputs
+  - Fast convergence (typically 0.5-2 seconds on GPU)
+  - Support for multiple objectives with customizable weights
+
+- **Constraint Management**:
+  - Hard constraints (min/max bounds)
+  - Soft constraints (maximum change rate limits)
+  - Automatic constraint projection during optimization
+  - Fixed vs optimizable input specification
+
+- **Multi-Objective Optimization**:
+  - Pareto frontier generation for conflicting objectives
+  - Weight scanning to explore trade-off solutions
+  - Interactive visualization with Plotly
+  - Solution selection and comparison tools
+
+- **Kalman Filter Real-Time Correction**:
+  - Unscented Kalman Filter for nonlinear model handling
+  - Real-time control correction based on sensor feedback
+  - Robust handling of measurement noise
+  - Performance improvement tracking
+
+- **Interactive Gradio Interface**:
+  - Tab 0: Model loading and basic inference
+  - Tab 1: Gradient-based inverse optimization
+  - Tab 2: Multi-objective Pareto frontier
+  - Tab 3: Kalman filter real-time correction
+
+**Use Cases**:
+- Optimize fuel flow to reduce NOx emissions by 10%
+- Balance efficiency vs emissions trade-offs
+- Real-time control adjustment based on sensor feedback
+- Find optimal operating points for multiple objectives
+
+**Quick Start**:
+```bash
+# Launch inverse optimization interface
+python gradio_apps/inverse_control_interface.py
+
+# Or use in code
+from optimization import InverseOptimizer, ConstraintManager
+optimizer = InverseOptimizer(model, scaler_X, scaler_y)
+result = optimizer.optimize(targets, constraint_manager)
+```
+
+See [`optimization/README.md`](optimization/README.md) for detailed documentation.
+
+---
+
+### v3.0 (Planned) 🚀
 
 #### **Stage3 Temporal Oscillation Enhancement System** 🕐
 The next evolution targeting temporal oscillation signal reconstruction:

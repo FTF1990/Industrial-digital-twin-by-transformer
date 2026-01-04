@@ -12,6 +12,12 @@ seaborn>=0.12.0
 # Web Interface
 gradio>=4.0.0
 
+# Interactive Visualization
+plotly>=5.0.0
+
+# Kalman Filtering
+filterpy>=1.4.5
+
 # Progress Bars
 tqdm>=4.62.0
 
