@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sensor Transformer Web UI</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <!-- Chart.js from CDN (only dependency) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ════ Header ════ -->
+<div class="header">
+  <h1>Sensor Transformer Web UI</h1>
+  <span class="status" id="globalStatus">Ready</span>
+</div>
+
+<!-- ════ Tabs ════ -->
+<div class="tabs">
+  <button class="tab-btn active" data-tab="data">
+    <span class="step-num">1</span> Data &amp; Config
+  </button>
+  <button class="tab-btn" data-tab="stage1">
+    <span class="step-num">2</span> Stage1 Training
+  </button>
+  <button class="tab-btn" data-tab="residuals">
+    <span class="step-num">3</span> Residual Extraction
+  </button>
+  <button class="tab-btn" data-tab="stage2">
+    <span class="step-num">4</span> Stage2 Training
+  </button>
+  <button class="tab-btn" data-tab="inference">
+    <span class="step-num">5</span> Ensemble Inference
+  </button>
+  <button class="tab-btn" data-tab="results">
+    <span class="step-num">6</span> Results
+  </button>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- TAB 1: Data & Config                               -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="tab-content active" id="tab-data">
+
+  <!-- Upload CSV -->
+  <div class="card">
+    <div class="card-title">Upload CSV Data</div>
+    <div class="upload-zone" id="csvUploadZone">
+      <input type="file" id="csvFileInput" accept=".csv">
+      <div>Click or drag CSV file here</div>
+      <div class="text-muted mt-8">Sensor time-series data</div>
+    </div>
+    <div class="mt-8" id="csvFileList"></div>
+  </div>
+
+  <!-- Data Preview -->
+  <div class="card hidden" id="dataPreviewCard">
+    <div class="flex-row-between mb-12">
+      <div class="card-title" style="margin-bottom:0">Data Preview</div>
+      <span class="text-muted" id="dataInfo"></span>
+    </div>
+    <div class="table-wrap" id="dataTable"></div>
+  </div>
+
+  <!-- Signal Config -->
+  <div class="card hidden" id="signalConfigCard">
+    <div class="flex-row-between mb-12">
+      <div class="card-title" style="margin-bottom:0">Signal Configuration</div>
+      <div class="flex-row">
+        <button class="btn btn-outline btn-sm" id="btnLoadConfig">Load Config</button>
+        <input type="file" id="configFileInput" accept=".json" style="display:none">
+        <button class="btn btn-primary btn-sm" id="btnSaveConfig">Save Config</button>
+      </div>
+    </div>
+
+    <div class="signal-columns">
+      <!-- Available Signals -->
+      <div>
+        <div class="signal-list">
+          <div class="signal-list-header">
+            <span>Available Signals</span>
+            <span id="availableCount">0</span>
+          </div>
+          <div id="availableSignals"></div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="signal-actions">
+        <button class="btn btn-outline btn-sm" id="btnAddBoundary" title="Add to Boundary">&#8594; B</button>
+        <button class="btn btn-outline btn-sm" id="btnAddTarget" title="Add to Target">&#8594; T</button>
+        <button class="btn btn-outline btn-sm" id="btnRemoveSignal" title="Remove">&larr;</button>
+      </div>
+
+      <!-- Assigned Signals (2 sub-lists) -->
+      <div>
+        <div class="signal-list" style="margin-bottom:8px">
+          <div class="signal-list-header" style="color:var(--primary)">
+            <span>Boundary Signals (Input)</span>
+            <span id="boundaryCount">0</span>
+          </div>
+          <div id="boundarySignals"></div>
+        </div>
+        <div class="signal-list">
+          <div class="signal-list-header" style="color:var(--success)">
+            <span>Target Signals (Output)</span>
+            <span id="targetCount">0</span>
+          </div>
+          <div id="targetSignals"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- TAB 2: Stage1 Training                             -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-stage1">
+  <div class="card">
+    <div class="card-title">Stage1 Training — StaticSensorTransformer</div>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Model Name</label>
+        <input type="text" id="s1Name" placeholder="auto-generated">
+      </div>
+      <div class="form-group">
+        <label>d_model</label>
+        <input type="number" id="s1Dmodel" value="128">
+      </div>
+      <div class="form-group">
+        <label>nhead</label>
+        <input type="number" id="s1Nhead" value="8">
+      </div>
+      <div class="form-group">
+        <label>num_layers</label>
+        <input type="number" id="s1Layers" value="3">
+      </div>
+      <div class="form-group">
+        <label>dropout</label>
+        <input type="number" id="s1Dropout" value="0.1" step="0.01">
+      </div>
+      <div class="form-group">
+        <label>Epochs</label>
+        <input type="number" id="s1Epochs" value="100">
+      </div>
+      <div class="form-group">
+        <label>Batch Size</label>
+        <input type="number" id="s1Batch" value="64">
+      </div>
+      <div class="form-group">
+        <label>Learning Rate</label>
+        <input type="number" id="s1Lr" value="0.001" step="0.0001">
+      </div>
+      <div class="form-group">
+        <label>Weight Decay</label>
+        <input type="number" id="s1Wd" value="0.00001" step="0.00001">
+      </div>
+      <div class="form-group">
+        <label>Grad Clip</label>
+        <input type="number" id="s1GradClip" value="1.0" step="0.1">
+      </div>
+      <div class="form-group">
+        <label>Patience</label>
+        <input type="number" id="s1Patience" value="25">
+      </div>
+      <div class="form-group">
+        <label>Test Size</label>
+        <input type="number" id="s1TestSize" value="0.2" step="0.05">
+      </div>
+      <div class="form-group">
+        <label>Val Size</label>
+        <input type="number" id="s1ValSize" value="0.2" step="0.05">
+      </div>
+    </div>
+
+    <div class="flex-row mt-16">
+      <button class="btn btn-primary" id="btnTrainS1">Start Stage1 Training</button>
+      <button class="btn btn-danger hidden" id="btnAbortS1">Abort</button>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="card hidden" id="s1ProgressCard">
+    <div class="flex-row-between mb-12">
+      <div class="card-title" style="margin-bottom:0">Training Progress</div>
+      <span class="text-muted" id="s1EpochInfo"></span>
+    </div>
+    <div class="progress-bar-wrap"><div class="progress-bar" id="s1ProgressBar"></div></div>
+
+    <div class="metrics-grid mt-16" id="s1MetricsLive"></div>
+
+    <!-- Loss/R² chart -->
+    <div class="chart-container mt-16">
+      <canvas id="s1LossChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Test Results -->
+  <div class="card hidden" id="s1ResultCard">
+    <div class="card-title">Test Evaluation Results</div>
+    <div class="metrics-grid" id="s1TestMetrics"></div>
+    <div class="mt-16" id="s1PerSignalMetrics"></div>
+  </div>
+
+  <!-- Log -->
+  <div class="card">
+    <div class="card-title">Log</div>
+    <div class="log-panel" id="s1Log"></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- TAB 3: Residual Extraction                         -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-residuals">
+  <div class="card">
+    <div class="card-title">Extract Stage1 Residuals</div>
+    <p class="text-muted mb-12">
+      Computes residuals = y_true - y_pred (in original scale) for Stage2 training.
+    </p>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Stage1 Model (.pth)</label>
+        <select id="resModelSelect"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Stage1 Scalers (.pkl)</label>
+        <select id="resScalerSelect"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Data CSV</label>
+        <select id="resDataSelect"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Signal Config</label>
+        <select id="resConfigSelect"><option value="">-- select --</option></select>
+      </div>
+    </div>
+
+    <div class="flex-row mt-16">
+      <button class="btn btn-primary" id="btnExtractRes">Extract Residuals</button>
+      <button class="btn btn-danger hidden" id="btnAbortRes">Abort</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="resResultCard">
+    <div class="card-title">Residual Extraction Results</div>
+    <div class="metrics-grid" id="resMetrics"></div>
+    <div class="mt-16" id="resPerSignal"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Log</div>
+    <div class="log-panel" id="resLog"></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- TAB 4: Stage2 Training                             -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-stage2">
+  <div class="card">
+    <div class="card-title">Stage2 Training — Residual Boost Model</div>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Residuals CSV</label>
+        <select id="s2ResidualsSelect"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Signal Config</label>
+        <select id="s2ConfigSelect"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Stage1 Config JSON</label>
+        <select id="s2Stage1ConfigSelect"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Model Name</label>
+        <input type="text" id="s2Name" placeholder="auto-generated">
+      </div>
+      <div class="form-group">
+        <label>d_model</label>
+        <input type="number" id="s2Dmodel" value="128">
+      </div>
+      <div class="form-group">
+        <label>nhead</label>
+        <input type="number" id="s2Nhead" value="8">
+      </div>
+      <div class="form-group">
+        <label>num_layers</label>
+        <input type="number" id="s2Layers" value="3">
+      </div>
+      <div class="form-group">
+        <label>dropout</label>
+        <input type="number" id="s2Dropout" value="0.1" step="0.01">
+      </div>
+      <div class="form-group">
+        <label>Epochs</label>
+        <input type="number" id="s2Epochs" value="100">
+      </div>
+      <div class="form-group">
+        <label>Batch Size</label>
+        <input type="number" id="s2Batch" value="64">
+      </div>
+      <div class="form-group">
+        <label>Learning Rate</label>
+        <input type="number" id="s2Lr" value="0.001" step="0.0001">
+      </div>
+      <div class="form-group">
+        <label>Patience</label>
+        <input type="number" id="s2Patience" value="25">
+      </div>
+    </div>
+
+    <div class="flex-row mt-16">
+      <button class="btn btn-primary" id="btnTrainS2">Start Stage2 Training</button>
+      <button class="btn btn-danger hidden" id="btnAbortS2">Abort</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="s2ProgressCard">
+    <div class="flex-row-between mb-12">
+      <div class="card-title" style="margin-bottom:0">Training Progress</div>
+      <span class="text-muted" id="s2EpochInfo"></span>
+    </div>
+    <div class="progress-bar-wrap"><div class="progress-bar" id="s2ProgressBar"></div></div>
+    <div class="metrics-grid mt-16" id="s2MetricsLive"></div>
+    <div class="chart-container mt-16">
+      <canvas id="s2LossChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card hidden" id="s2ResultCard">
+    <div class="card-title">Test Evaluation Results</div>
+    <div class="metrics-grid" id="s2TestMetrics"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Log</div>
+    <div class="log-panel" id="s2Log"></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- TAB 5: Ensemble Inference                          -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-inference">
+  <div class="card">
+    <div class="card-title">Ensemble Inference — Stage1 + Stage2</div>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Stage1 Model</label>
+        <select id="infS1Model"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Stage1 Scalers</label>
+        <select id="infS1Scalers"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Stage2 Model</label>
+        <select id="infS2Model"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Stage2 Scalers</label>
+        <select id="infS2Scalers"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Data CSV</label>
+        <select id="infDataSelect"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>Signal Config</label>
+        <select id="infConfigSelect"><option value="">-- select --</option></select>
+      </div>
+      <div class="form-group">
+        <label>R² Threshold</label>
+        <input type="number" id="infR2Threshold" value="0.4" step="0.05">
+      </div>
+      <div class="form-group">
+        <label>Residual Metrics JSON (opt.)</label>
+        <select id="infResMetrics"><option value="">-- auto-compute --</option></select>
+      </div>
+    </div>
+
+    <div class="flex-row mt-16">
+      <button class="btn btn-primary" id="btnRunInference">Run Ensemble Inference</button>
+      <button class="btn btn-success hidden" id="btnGenCharts">Generate Charts</button>
+      <button class="btn btn-danger hidden" id="btnAbortInf">Abort</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="infResultCard">
+    <div class="card-title">Inference Comparison</div>
+    <div class="metrics-grid" id="infOverallMetrics"></div>
+    <div class="mt-16" id="infPerSignal"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Log</div>
+    <div class="log-panel" id="infLog"></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════ -->
+<!-- TAB 6: Results & Charts                            -->
+<!-- ════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-results">
+  <div class="card">
+    <div class="card-title">Generated Charts</div>
+    <div class="flex-row mb-12">
+      <button class="btn btn-outline btn-sm" id="btnRefreshCharts">Refresh</button>
+      <button class="btn btn-outline btn-sm" id="btnDownloadPredCSV">Download predictions.csv</button>
+      <button class="btn btn-outline btn-sm" id="btnDownloadResultJSON">Download results.json</button>
+    </div>
+    <div class="image-grid" id="chartGrid"></div>
+    <div class="text-muted mt-8" id="noChartsMsg">No charts generated yet. Run inference and generate charts first.</div>
+  </div>
+</div>
+
+<!-- ════ Scripts ════ -->
+<script src="/js/app.js"></script>
+</body>
+</html>
