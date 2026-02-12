@@ -2,12 +2,15 @@
 """
 Stage2 Training Script - Residual Boost Model
 
-Trains a Stage2 SST model on extracted residuals from Stage1.
+Trains a Stage2 model on extracted residuals from Stage1.
+Supports Signal Mapping Layer with configurable mask mode:
+  - stage2_mask_mode='same': Use same mask as Stage1 (consistent physical semantics)
+  - stage2_mask_mode='none': No masking (pure accuracy optimization, for comparison)
 
 Usage:
     python train_stage2.py --residuals ./residuals/residuals.csv \
         --config signals.json --stage1_config ./models/stage1_config.json \
-        --output ./models/
+        --output ./models/ --stage2_mask_mode same
 """
 
 import argparse
@@ -28,7 +31,13 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
+WEBUI_PYTHON = os.path.dirname(__file__)
+sys.path.insert(0, WEBUI_PYTHON)
+
 from models.static_transformer import StaticSensorTransformer
+from signal_mapping_utils import (
+    is_mapping_enabled, generate_mask_matrix, generate_full_mask, describe_mask
+)
 
 
 def emit(msg_type, **kwargs):
@@ -66,6 +75,24 @@ def train(args):
     boundary_signals = config['boundary']
     target_signals = config['target']
     residual_columns = [f"{sig}_residual" for sig in target_signals]
+
+    # ── Check Signal Mapping ──
+    use_mapping = is_mapping_enabled(config)
+    mapping_config = config.get('signal_mapping', {})
+    mask_mode = args.stage2_mask_mode
+
+    if use_mapping:
+        emit("info", message=f"Signal Mapping detected. Stage2 mask mode: '{mask_mode}'")
+        if mask_mode == 'same':
+            mask_matrix = generate_mask_matrix(boundary_signals, target_signals, mapping_config)
+            mask_desc = describe_mask(mask_matrix, boundary_signals, target_signals)
+            emit("info", message=f"Using SAME mask as Stage1: {mask_desc['blocked_connections']} connections blocked")
+        else:
+            mask_matrix = generate_full_mask(boundary_signals, target_signals)
+            emit("info", message="Using NO mask (all connections allowed) for Stage2")
+    else:
+        mask_matrix = None
+        emit("info", message="Standard mode (no signal mapping)")
 
     # ── Load Stage1 Config for data split consistency ──
     with open(args.stage1_config, 'r') as f:
@@ -118,15 +145,28 @@ def train(args):
     train_loader = DataLoader(train_ds, batch_size=bs, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=bs, shuffle=False)
 
-    # ── Build Model (same SST architecture) ──
-    model = StaticSensorTransformer(
-        num_boundary_sensors=len(boundary_signals),
-        num_target_sensors=len(target_signals),
-        d_model=args.d_model,
-        nhead=args.nhead,
-        num_layers=args.num_layers,
-        dropout=args.dropout
-    ).to(device)
+    # ── Build Model ──
+    if use_mapping:
+        from models.masked_sst import MaskedSST
+        model = MaskedSST(
+            num_input_signals=len(boundary_signals),
+            num_output_signals=len(target_signals),
+            d_model=args.d_model,
+            nhead=args.nhead,
+            num_layers=args.num_layers,
+            dropout=args.dropout,
+            mask_matrix=mask_matrix
+        ).to(device)
+        emit("info", message=f"Stage2 using MaskedSST (mask_mode='{mask_mode}')")
+    else:
+        model = StaticSensorTransformer(
+            num_boundary_sensors=len(boundary_signals),
+            num_target_sensors=len(target_signals),
+            d_model=args.d_model,
+            nhead=args.nhead,
+            num_layers=args.num_layers,
+            dropout=args.dropout
+        ).to(device)
 
     total_params = sum(p.numel() for p in model.parameters())
     emit("info", message=f"Stage2 model parameters: {total_params:,}")
@@ -259,12 +299,11 @@ def train(args):
     os.makedirs(args.output, exist_ok=True)
     model_name = args.name or f"stage2_{int(time.time())}"
 
-    model_path = os.path.join(args.output, f"{model_name}.pth")
-    torch.save({
+    # Build checkpoint
+    checkpoint = {
         'model_state_dict': model.state_dict(),
+        'model_type': 'MaskedSST' if use_mapping else 'SST',
         'model_config': {
-            'num_boundary_sensors': len(boundary_signals),
-            'num_target_sensors': len(target_signals),
             'd_model': args.d_model,
             'nhead': args.nhead,
             'num_layers': args.num_layers,
@@ -277,7 +316,24 @@ def train(args):
             'best_val_loss': best_val_loss,
         },
         'history': history
-    }, model_path)
+    }
+
+    if use_mapping:
+        checkpoint['model_config']['num_input_signals'] = len(boundary_signals)
+        checkpoint['model_config']['num_output_signals'] = len(target_signals)
+        checkpoint['signal_mapping'] = {
+            'enabled': True,
+            'mask_mode': mask_mode,
+            'input_signals': boundary_signals,
+            'output_signals': target_signals,
+            'mask_matrix': mask_matrix.tolist(),
+        }
+    else:
+        checkpoint['model_config']['num_boundary_sensors'] = len(boundary_signals)
+        checkpoint['model_config']['num_target_sensors'] = len(target_signals)
+
+    model_path = os.path.join(args.output, f"{model_name}.pth")
+    torch.save(checkpoint, model_path)
 
     scaler_path = os.path.join(args.output, f"{model_name}_scalers.pkl")
     with open(scaler_path, 'wb') as f:
@@ -289,16 +345,10 @@ def train(args):
         'model_path': model_path,
         'scaler_path': scaler_path,
         'stage': 2,
+        'model_type': 'MaskedSST' if use_mapping else 'SST',
         'boundary_signals': boundary_signals,
         'target_signals': target_signals,
-        'architecture': {
-            'num_boundary_sensors': len(boundary_signals),
-            'num_target_sensors': len(target_signals),
-            'd_model': args.d_model,
-            'nhead': args.nhead,
-            'num_layers': args.num_layers,
-            'dropout': args.dropout,
-        },
+        'architecture': checkpoint['model_config'],
         'data_split': {
             'test_size': test_size,
             'val_size': val_size,
@@ -308,12 +358,19 @@ def train(args):
             'per_signal': per_signal_metrics,
         }
     }
+    if use_mapping:
+        stage2_conf['signal_mapping'] = {
+            'enabled': True,
+            'mask_mode': mask_mode,
+        }
+
     with open(config_path, 'w') as f:
         json.dump(stage2_conf, f, indent=2)
 
     emit("complete", model_name=model_name,
          model_path=model_path, scaler_path=scaler_path, config_path=config_path,
-         overall_r2=round(overall_r2, 4), epochs_trained=epoch)
+         overall_r2=round(overall_r2, 4), epochs_trained=epoch,
+         stage2_mask_mode=mask_mode)
 
 
 def main():
@@ -337,6 +394,10 @@ def main():
     parser.add_argument('--patience', type=int, default=25)
     parser.add_argument('--test_size', type=float, default=0.2)
     parser.add_argument('--val_size', type=float, default=0.2)
+
+    # Signal Mapping
+    parser.add_argument('--stage2_mask_mode', default='same', choices=['same', 'none'],
+                        help='Stage2 mask mode: "same" uses Stage1 mask, "none" disables masking')
 
     args = parser.parse_args()
     train(args)

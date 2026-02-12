@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-Stage1 Training Script - StaticSensorTransformer (SST)
+Stage1 Training Script - StaticSensorTransformer (SST) / MaskedSST
 
 Standalone CLI tool for training the Stage1 base model.
+Supports Signal Mapping Layer for Level 2/3 digital twin configurations.
 Streams JSON progress to stdout for Node.js integration.
 
 Usage:
+    # Level 1 (no overlap):
     python train_stage1.py --data data.csv --config signals.json --output ./models/
+
+    # Level 2/3 (with signal mapping):
+    python train_stage1.py --data data.csv --config signals_with_mapping.json --output ./models/
 """
 
 import argparse
@@ -28,7 +33,12 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
+# Add web-ui python to path for local models
+WEBUI_PYTHON = os.path.dirname(__file__)
+sys.path.insert(0, WEBUI_PYTHON)
+
 from models.static_transformer import StaticSensorTransformer
+from signal_mapping_utils import is_mapping_enabled, generate_mask_matrix, describe_mask
 
 
 def emit(msg_type, **kwargs):
@@ -77,6 +87,15 @@ def train(args):
     boundary_signals = config['boundary']
     target_signals = config['target']
 
+    # Check if signal mapping is enabled
+    use_mapping = is_mapping_enabled(config)
+    mapping_config = config.get('signal_mapping', {})
+
+    if use_mapping:
+        emit("info", message="Signal Mapping Layer ENABLED (Level 2/3 mode)")
+    else:
+        emit("info", message="Standard mode (Level 1, no signal mapping)")
+
     # Validate signals exist in data
     missing_b = [s for s in boundary_signals if s not in df.columns]
     missing_t = [s for s in target_signals if s not in df.columns]
@@ -87,12 +106,26 @@ def train(args):
         emit("error", message=f"Missing target signals in data: {missing_t}")
         sys.exit(1)
 
+    # Check overlap
     overlap = set(boundary_signals) & set(target_signals)
-    if overlap:
-        emit("error", message=f"Signal overlap between boundary and target: {list(overlap)}")
+    if overlap and not use_mapping:
+        emit("error", message=f"Signal overlap between boundary and target: {list(overlap)}. "
+                               "Enable signal_mapping in config to allow overlap.")
         sys.exit(1)
+    if overlap and use_mapping:
+        emit("info", message=f"Overlapping signals (will be masked): {list(overlap)}")
 
-    emit("info", message=f"Boundary signals: {len(boundary_signals)}, Target signals: {len(target_signals)}")
+    emit("info", message=f"Input signals: {len(boundary_signals)}, Output signals: {len(target_signals)}")
+
+    # ── Generate Mask Matrix (if mapping enabled) ──
+    mask_matrix = None
+    if use_mapping:
+        mask_matrix = generate_mask_matrix(boundary_signals, target_signals, mapping_config)
+        mask_desc = describe_mask(mask_matrix, boundary_signals, target_signals)
+        emit("info", message=f"Mask matrix: {mask_desc['allowed_connections']}/{mask_desc['total_connections']} "
+                              f"connections allowed, {mask_desc['blocked_connections']} blocked")
+        for pair in mask_desc['blocked_pairs']:
+            emit("info", message=f"  Blocked: {pair['input']} -> {pair['output']}")
 
     # ── Prepare Data ──
     X = df[boundary_signals].values.astype(np.float32)
@@ -138,14 +171,28 @@ def train(args):
     val_loader = DataLoader(val_ds, batch_size=bs, shuffle=False)
 
     # ── Build Model ──
-    model = StaticSensorTransformer(
-        num_boundary_sensors=len(boundary_signals),
-        num_target_sensors=len(target_signals),
-        d_model=args.d_model,
-        nhead=args.nhead,
-        num_layers=args.num_layers,
-        dropout=args.dropout
-    ).to(device)
+    if use_mapping:
+        from models.masked_sst import MaskedSST
+        model = MaskedSST(
+            num_input_signals=len(boundary_signals),
+            num_output_signals=len(target_signals),
+            d_model=args.d_model,
+            nhead=args.nhead,
+            num_layers=args.num_layers,
+            dropout=args.dropout,
+            mask_matrix=mask_matrix
+        ).to(device)
+        emit("info", message="Using MaskedSST with Signal Mapping Layer")
+    else:
+        model = StaticSensorTransformer(
+            num_boundary_sensors=len(boundary_signals),
+            num_target_sensors=len(target_signals),
+            d_model=args.d_model,
+            nhead=args.nhead,
+            num_layers=args.num_layers,
+            dropout=args.dropout
+        ).to(device)
+        emit("info", message="Using standard StaticSensorTransformer")
 
     total_params = sum(p.numel() for p in model.parameters())
     emit("info", message=f"Model parameters: {total_params:,}")
@@ -308,13 +355,11 @@ def train(args):
 
     model_name = args.name or f"stage1_{int(time.time())}"
 
-    # Save model
-    model_path = os.path.join(args.output, f"{model_name}.pth")
-    torch.save({
+    # Build checkpoint
+    checkpoint = {
         'model_state_dict': model.state_dict(),
+        'model_type': 'MaskedSST' if use_mapping else 'SST',
         'model_config': {
-            'num_boundary_sensors': len(boundary_signals),
-            'num_target_sensors': len(target_signals),
             'd_model': args.d_model,
             'nhead': args.nhead,
             'num_layers': args.num_layers,
@@ -327,7 +372,25 @@ def train(args):
             'best_val_loss': best_val_loss,
         },
         'history': history
-    }, model_path)
+    }
+
+    if use_mapping:
+        checkpoint['model_config']['num_input_signals'] = len(boundary_signals)
+        checkpoint['model_config']['num_output_signals'] = len(target_signals)
+        checkpoint['signal_mapping'] = {
+            'enabled': True,
+            'input_signals': boundary_signals,
+            'output_signals': target_signals,
+            'mask_matrix': mask_matrix.tolist(),
+            'config': mapping_config,
+        }
+    else:
+        checkpoint['model_config']['num_boundary_sensors'] = len(boundary_signals)
+        checkpoint['model_config']['num_target_sensors'] = len(target_signals)
+
+    # Save model
+    model_path = os.path.join(args.output, f"{model_name}.pth")
+    torch.save(checkpoint, model_path)
 
     # Save scalers
     scaler_path = os.path.join(args.output, f"{model_name}_scalers.pkl")
@@ -340,16 +403,10 @@ def train(args):
         'model_name': model_name,
         'model_path': model_path,
         'scaler_path': scaler_path,
+        'model_type': 'MaskedSST' if use_mapping else 'SST',
         'boundary_signals': boundary_signals,
         'target_signals': target_signals,
-        'architecture': {
-            'num_boundary_sensors': len(boundary_signals),
-            'num_target_sensors': len(target_signals),
-            'd_model': args.d_model,
-            'nhead': args.nhead,
-            'num_layers': args.num_layers,
-            'dropout': args.dropout,
-        },
+        'architecture': checkpoint['model_config'],
         'data_split': {
             'test_size': args.test_size,
             'val_size': args.val_size,
@@ -364,12 +421,20 @@ def train(args):
             'per_signal': per_signal_metrics,
         }
     }
+    if use_mapping:
+        inference_config['signal_mapping'] = {
+            'enabled': True,
+            'mask_summary': describe_mask(mask_matrix, boundary_signals, target_signals),
+            'config': mapping_config,
+        }
+
     with open(config_path, 'w') as f:
         json.dump(inference_config, f, indent=2)
 
     emit("complete", model_name=model_name,
          model_path=model_path, scaler_path=scaler_path, config_path=config_path,
-         overall_r2=round(overall_r2, 4), epochs_trained=epoch)
+         overall_r2=round(overall_r2, 4), epochs_trained=epoch,
+         model_type='MaskedSST' if use_mapping else 'SST')
 
 
 def main():

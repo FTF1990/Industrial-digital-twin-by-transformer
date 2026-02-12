@@ -112,6 +112,65 @@
       </div>
     </div>
   </div>
+
+  <!-- Signal Mapping Configuration (Level 2/3) -->
+  <div class="card hidden" id="signalMappingCard">
+    <div class="flex-row-between mb-12">
+      <div class="card-title" style="margin-bottom:0">Signal Mapping Layer (Level 2/3)</div>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="chkEnableMapping">
+        <span>Enable</span>
+      </label>
+    </div>
+
+    <div id="mappingConfigSection" class="hidden">
+      <p class="text-muted mb-12">
+        When enabled, signals can appear in both Input and Output. The mapping layer controls
+        which input signals can influence which output predictions.
+      </p>
+
+      <!-- Overlap Info -->
+      <div id="overlapInfo" class="hidden" style="background:var(--bg-card);border:1px solid var(--primary);border-radius:6px;padding:8px 12px;margin-bottom:12px">
+        <span style="color:var(--primary)">Overlapping signals: </span>
+        <span id="overlapSignalsList"></span>
+      </div>
+
+      <!-- Auto-exclude self -->
+      <div style="margin-bottom:12px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="chkAutoExcludeSelf" checked>
+          <span>Auto-exclude self-prediction (recommended)</span>
+        </label>
+        <div class="text-muted" style="font-size:11px;margin-left:22px">
+          Prevents a signal from predicting itself when it appears in both input and output
+        </div>
+      </div>
+
+      <!-- Forced Exclusions -->
+      <div style="margin-bottom:12px">
+        <div style="font-weight:500;margin-bottom:6px">Forced Exclusions</div>
+        <div class="text-muted" style="font-size:11px;margin-bottom:6px">
+          Manually block specific input-to-output connections (weight = 0)
+        </div>
+        <div class="flex-row" style="gap:4px;margin-bottom:6px">
+          <select id="exclInputSelect" style="flex:1"><option value="">Input signal</option></select>
+          <span style="color:var(--text-muted);padding:0 4px">-></span>
+          <select id="exclOutputSelect" style="flex:1"><option value="">Output signal</option></select>
+          <button class="btn btn-outline btn-sm" id="btnAddExclusion">+ Add</button>
+        </div>
+        <div id="exclusionsList"></div>
+      </div>
+
+      <!-- Mask Matrix Preview -->
+      <div>
+        <div style="font-weight:500;margin-bottom:6px">Mask Matrix Preview</div>
+        <div id="maskMatrixPreview" class="table-wrap" style="font-size:11px;max-height:300px;overflow:auto"></div>
+        <div class="text-muted" style="font-size:11px;margin-top:4px">
+          Green = allowed, Red = blocked
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <!-- ════════════════════════════════════════════════════ -->
@@ -314,6 +373,16 @@
       <div class="form-group">
         <label>Patience</label>
         <input type="number" id="s2Patience" value="25">
+      </div>
+      <div class="form-group">
+        <label>Stage2 Mask Mode</label>
+        <select id="s2MaskMode">
+          <option value="same">same (use Stage1 mask)</option>
+          <option value="none">none (no masking)</option>
+        </select>
+        <div class="text-muted" style="font-size:11px;margin-top:2px">
+          Only applies when Signal Mapping is enabled
+        </div>
       </div>
     </div>
 

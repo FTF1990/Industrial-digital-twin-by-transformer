@@ -3,6 +3,7 @@
 Residual Extraction Script
 
 Extracts Stage1 residuals (y_true - y_pred) in original scale for Stage2 training.
+Supports both SST and MaskedSST model types.
 
 Usage:
     python extract_residuals.py --model stage1.pth --scalers stage1_scalers.pkl \
@@ -23,12 +24,52 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
-from models.static_transformer import StaticSensorTransformer
+WEBUI_PYTHON = os.path.dirname(__file__)
+sys.path.insert(0, WEBUI_PYTHON)
 
 
 def emit(msg_type, **kwargs):
     msg = {"type": msg_type, **kwargs}
     print(json.dumps(msg, ensure_ascii=False), flush=True)
+
+
+def load_model_auto(checkpoint, device):
+    """Load model from checkpoint, auto-detecting SST vs MaskedSST."""
+    model_type = checkpoint.get('model_type', 'SST')
+    cfg = checkpoint['model_config']
+
+    if model_type == 'MaskedSST':
+        from models.masked_sst import MaskedSST
+        signal_mapping_data = checkpoint.get('signal_mapping', {})
+        mask = None
+        if 'mask_matrix' in signal_mapping_data:
+            mask = torch.tensor(signal_mapping_data['mask_matrix'], dtype=torch.float32)
+
+        model = MaskedSST(
+            num_input_signals=cfg['num_input_signals'],
+            num_output_signals=cfg['num_output_signals'],
+            d_model=cfg['d_model'],
+            nhead=cfg['nhead'],
+            num_layers=cfg['num_layers'],
+            dropout=cfg.get('dropout', 0.1),
+            mask_matrix=mask
+        ).to(device)
+        emit("info", message=f"Loaded MaskedSST model (Signal Mapping enabled)")
+    else:
+        from models.static_transformer import StaticSensorTransformer
+        model = StaticSensorTransformer(
+            num_boundary_sensors=cfg.get('num_boundary_sensors', cfg.get('num_input_signals')),
+            num_target_sensors=cfg.get('num_target_sensors', cfg.get('num_output_signals')),
+            d_model=cfg['d_model'],
+            nhead=cfg['nhead'],
+            num_layers=cfg['num_layers'],
+            dropout=cfg.get('dropout', 0.1)
+        ).to(device)
+        emit("info", message="Loaded standard SST model")
+
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    return model
 
 
 def main():
@@ -68,18 +109,7 @@ def main():
     # ── Load Model ──
     emit("status", stage="loading_model")
     checkpoint = torch.load(args.model, map_location=device, weights_only=False)
-    model_config = checkpoint['model_config']
-
-    model = StaticSensorTransformer(
-        num_boundary_sensors=model_config['num_boundary_sensors'],
-        num_target_sensors=model_config['num_target_sensors'],
-        d_model=model_config['d_model'],
-        nhead=model_config['nhead'],
-        num_layers=model_config['num_layers'],
-        dropout=model_config.get('dropout', 0.1)
-    ).to(device)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()
+    model = load_model_auto(checkpoint, device)
 
     # ── Load Scalers ──
     with open(args.scalers, 'rb') as f:
@@ -169,6 +199,7 @@ def main():
         'boundary_signals': boundary_signals,
         'target_signals': target_signals,
         'num_samples': len(X),
+        'model_type': checkpoint.get('model_type', 'SST'),
     }
     with open(metrics_path, 'w') as f:
         json.dump(metrics_data, f, indent=2)

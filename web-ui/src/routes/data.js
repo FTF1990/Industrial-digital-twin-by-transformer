@@ -68,12 +68,16 @@ router.post('/upload-config', uploadConfig.single('file'), (req, res) => {
 
 // ── Save signal config (from UI) ──
 router.post('/save-config', express.json(), (req, res) => {
-  const { name, boundary, target } = req.body;
+  const { name, boundary, target, signal_mapping } = req.body;
   if (!name || !boundary || !target) {
     return res.status(400).json({ error: 'name, boundary, and target are required' });
   }
   const filePath = path.join(DIRS.configs, name.endsWith('.json') ? name : `${name}.json`);
   const config = { boundary, target };
+  // Include signal_mapping if provided
+  if (signal_mapping) {
+    config.signal_mapping = signal_mapping;
+  }
   fs.writeFileSync(filePath, JSON.stringify(config, null, 2));
   res.json({ path: filePath, config });
 });

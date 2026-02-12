@@ -18,6 +18,12 @@ const STATE = {
   residualsPath: null,
   predictionsCSV: null,
   resultsJSON: null,
+  signalMapping: {
+    enabled: false,
+    auto_exclude_self: true,
+    forced_exclusions: [],
+    forced_inclusions: [],
+  },
 };
 
 // ═══════════════════════════════════════════
@@ -170,6 +176,10 @@ let selectedTarget = new Set();
 
 function renderSignalSelector(headers) {
   show('signalConfigCard');
+  // Show mapping card when signals exist
+  if (STATE.boundary.length || STATE.target.length) {
+    show('signalMappingCard');
+  }
   const avail = $('availableSignals');
 
   // Filter out timestamp-like columns
@@ -179,9 +189,15 @@ function renderSignalSelector(headers) {
     !h.match(/^20\d{2}/)
   );
 
-  // Remove already assigned signals
-  const assigned = new Set([...STATE.boundary, ...STATE.target]);
-  const available = signals.filter(s => !assigned.has(s));
+  // Remove already assigned signals (mapping-aware)
+  let available;
+  if (STATE.signalMapping.enabled) {
+    // When mapping enabled, only hide signals already in BOTH lists
+    available = signals.filter(s => !(STATE.boundary.includes(s) && STATE.target.includes(s)));
+  } else {
+    const assigned = new Set([...STATE.boundary, ...STATE.target]);
+    available = signals.filter(s => !assigned.has(s));
+  }
 
   avail.innerHTML = '';
   available.forEach(sig => {
@@ -197,6 +213,7 @@ function renderSignalSelector(headers) {
   });
   $('availableCount').textContent = available.length;
   renderAssignedSignals();
+  updateMappingUI();
 }
 
 function renderAssignedSignals() {
@@ -235,13 +252,17 @@ function renderAssignedSignals() {
 
 // Arrow buttons
 $('btnAddBoundary').addEventListener('click', () => {
-  selectedAvailable.forEach(s => STATE.boundary.push(s));
+  selectedAvailable.forEach(s => {
+    if (!STATE.boundary.includes(s)) STATE.boundary.push(s);
+  });
   selectedAvailable.clear();
   if (STATE.currentCSV) renderSignalSelector(STATE.currentCSV.headers);
 });
 
 $('btnAddTarget').addEventListener('click', () => {
-  selectedAvailable.forEach(s => STATE.target.push(s));
+  selectedAvailable.forEach(s => {
+    if (!STATE.target.includes(s)) STATE.target.push(s);
+  });
   selectedAvailable.clear();
   if (STATE.currentCSV) renderSignalSelector(STATE.currentCSV.headers);
 });
@@ -262,10 +283,19 @@ $('btnSaveConfig').addEventListener('click', async () => {
   }
   const name = prompt('Config name:', 'signals_config');
   if (!name) return;
+  const body = { name, boundary: STATE.boundary, target: STATE.target };
+  if (STATE.signalMapping.enabled) {
+    body.signal_mapping = {
+      enabled: true,
+      auto_exclude_self: STATE.signalMapping.auto_exclude_self,
+      forced_exclusions: STATE.signalMapping.forced_exclusions,
+      forced_inclusions: STATE.signalMapping.forced_inclusions,
+    };
+  }
   const res = await fetch('/api/data/save-config', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, boundary: STATE.boundary, target: STATE.target }),
+    body: JSON.stringify(body),
   });
   const data = await res.json();
   STATE.configPath = data.path;
@@ -285,6 +315,23 @@ $('configFileInput').addEventListener('change', async () => {
   STATE.boundary = data.content.boundary || [];
   STATE.target = data.content.target || [];
   STATE.configPath = data.path;
+  // Restore signal mapping state
+  const sm = data.content.signal_mapping;
+  if (sm) {
+    STATE.signalMapping.enabled = !!sm.enabled;
+    STATE.signalMapping.auto_exclude_self = sm.auto_exclude_self !== false;
+    STATE.signalMapping.forced_exclusions = sm.forced_exclusions || [];
+    STATE.signalMapping.forced_inclusions = sm.forced_inclusions || [];
+    $('chkEnableMapping').checked = STATE.signalMapping.enabled;
+    $('chkAutoExcludeSelf').checked = STATE.signalMapping.auto_exclude_self;
+    if (STATE.signalMapping.enabled) show('mappingConfigSection');
+  } else {
+    STATE.signalMapping.enabled = false;
+    STATE.signalMapping.forced_exclusions = [];
+    STATE.signalMapping.forced_inclusions = [];
+    $('chkEnableMapping').checked = false;
+    hide('mappingConfigSection');
+  }
   if (STATE.currentCSV) renderSignalSelector(STATE.currentCSV.headers);
 });
 
@@ -375,10 +422,19 @@ $('btnTrainS1').addEventListener('click', () => {
   // Save config first if not already saved
   if (!STATE.configPath) {
     const tmpName = '_tmp_signals';
+    const configBody = { name: tmpName, boundary: STATE.boundary, target: STATE.target };
+    if (STATE.signalMapping.enabled) {
+      configBody.signal_mapping = {
+        enabled: true,
+        auto_exclude_self: STATE.signalMapping.auto_exclude_self,
+        forced_exclusions: STATE.signalMapping.forced_exclusions,
+        forced_inclusions: STATE.signalMapping.forced_inclusions,
+      };
+    }
     fetch('/api/data/save-config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: tmpName, boundary: STATE.boundary, target: STATE.target }),
+      body: JSON.stringify(configBody),
     }).then(r => r.json()).then(data => {
       STATE.configPath = data.path;
       startStage1Training();
@@ -561,6 +617,7 @@ $('btnTrainS2').addEventListener('click', () => {
     batch_size: $('s2Batch').value,
     lr: $('s2Lr').value,
     patience: $('s2Patience').value,
+    stage2_mask_mode: $('s2MaskMode').value,
   });
 
   connectSSE(`/api/pipeline/train-stage2?${params}`, {
@@ -816,6 +873,182 @@ function renderEnsembleTable(containerId, perSignal) {
   });
   html += '</tbody></table></div>';
   $(containerId).innerHTML = html;
+}
+
+// ═══════════════════════════════════════════
+// Signal Mapping UI Logic
+// ═══════════════════════════════════════════
+
+// Toggle mapping enable/disable
+$('chkEnableMapping').addEventListener('change', () => {
+  STATE.signalMapping.enabled = $('chkEnableMapping').checked;
+  if (STATE.signalMapping.enabled) {
+    show('mappingConfigSection');
+  } else {
+    hide('mappingConfigSection');
+  }
+  // Re-render signals to update available list (allow/disallow overlap)
+  if (STATE.currentCSV) renderSignalSelector(STATE.currentCSV.headers);
+});
+
+// Toggle auto-exclude self
+$('chkAutoExcludeSelf').addEventListener('change', () => {
+  STATE.signalMapping.auto_exclude_self = $('chkAutoExcludeSelf').checked;
+  updateMappingUI();
+});
+
+// Add forced exclusion
+$('btnAddExclusion').addEventListener('click', () => {
+  const inSig = $('exclInputSelect').value;
+  const outSig = $('exclOutputSelect').value;
+  if (!inSig || !outSig) { alert('Select both input and output signals.'); return; }
+
+  // Check for duplicates
+  const exists = STATE.signalMapping.forced_exclusions.some(
+    e => e.input === inSig && e.output === outSig
+  );
+  if (exists) { alert('This exclusion already exists.'); return; }
+
+  STATE.signalMapping.forced_exclusions.push({ input: inSig, output: outSig });
+  updateMappingUI();
+});
+
+function updateMappingUI() {
+  if (!STATE.signalMapping.enabled) return;
+
+  // Update overlap info
+  const overlap = STATE.boundary.filter(s => STATE.target.includes(s));
+  if (overlap.length > 0) {
+    show('overlapInfo');
+    $('overlapSignalsList').textContent = overlap.join(', ');
+  } else {
+    hide('overlapInfo');
+  }
+
+  // Populate exclusion dropdowns
+  populateExclusionDropdowns();
+
+  // Render exclusions list
+  renderExclusionsList();
+
+  // Render mask matrix preview
+  renderMaskMatrix();
+}
+
+function populateExclusionDropdowns() {
+  const inSel = $('exclInputSelect');
+  const outSel = $('exclOutputSelect');
+
+  inSel.innerHTML = '<option value="">Input signal</option>';
+  STATE.boundary.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    inSel.appendChild(opt);
+  });
+
+  outSel.innerHTML = '<option value="">Output signal</option>';
+  STATE.target.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    outSel.appendChild(opt);
+  });
+}
+
+function renderExclusionsList() {
+  const container = $('exclusionsList');
+  if (!STATE.signalMapping.forced_exclusions.length) {
+    container.innerHTML = '<span class="text-muted" style="font-size:12px">No forced exclusions</span>';
+    return;
+  }
+
+  container.innerHTML = STATE.signalMapping.forced_exclusions.map((excl, idx) =>
+    `<span class="file-chip" style="background:var(--danger);color:#fff;cursor:pointer"
+      onclick="removeExclusion(${idx})"
+      title="Click to remove">${excl.input} &rarr; ${excl.output} &times;</span>`
+  ).join(' ');
+}
+
+window.removeExclusion = function(idx) {
+  STATE.signalMapping.forced_exclusions.splice(idx, 1);
+  updateMappingUI();
+};
+
+function renderMaskMatrix() {
+  const container = $('maskMatrixPreview');
+
+  if (!STATE.boundary.length || !STATE.target.length) {
+    container.innerHTML = '<span class="text-muted">Configure signals first</span>';
+    return;
+  }
+
+  // Build mask matrix: rows = output (target), cols = input (boundary)
+  const numOut = STATE.target.length;
+  const numIn = STATE.boundary.length;
+  const mask = [];
+
+  for (let i = 0; i < numOut; i++) {
+    mask[i] = [];
+    for (let j = 0; j < numIn; j++) {
+      mask[i][j] = 1; // default: allowed
+    }
+  }
+
+  // Auto-exclude self
+  if (STATE.signalMapping.auto_exclude_self) {
+    for (let i = 0; i < numOut; i++) {
+      for (let j = 0; j < numIn; j++) {
+        if (STATE.target[i] === STATE.boundary[j]) {
+          mask[i][j] = 0;
+        }
+      }
+    }
+  }
+
+  // Forced exclusions
+  STATE.signalMapping.forced_exclusions.forEach(excl => {
+    const j = STATE.boundary.indexOf(excl.input);
+    const i = STATE.target.indexOf(excl.output);
+    if (i >= 0 && j >= 0) mask[i][j] = 0;
+  });
+
+  // Forced inclusions (override)
+  STATE.signalMapping.forced_inclusions.forEach(incl => {
+    const j = STATE.boundary.indexOf(incl.input);
+    const i = STATE.target.indexOf(incl.output);
+    if (i >= 0 && j >= 0) mask[i][j] = 1;
+  });
+
+  // Count stats
+  const total = numOut * numIn;
+  const blocked = mask.flat().filter(v => v === 0).length;
+
+  // Render table
+  let html = `<div style="margin-bottom:6px;font-size:12px">
+    ${total} connections: <span style="color:var(--success)">${total - blocked} allowed</span>,
+    <span style="color:var(--danger)">${blocked} blocked</span>
+  </div>`;
+
+  html += '<table style="border-collapse:collapse;font-size:11px"><thead><tr>';
+  html += '<th style="padding:3px 6px;border:1px solid var(--border)">Out \\ In</th>';
+  STATE.boundary.forEach(s => {
+    html += `<th style="padding:3px 6px;border:1px solid var(--border);writing-mode:vertical-lr;transform:rotate(180deg);max-width:30px">${s}</th>`;
+  });
+  html += '</tr></thead><tbody>';
+
+  for (let i = 0; i < numOut; i++) {
+    html += `<tr><td style="padding:3px 6px;border:1px solid var(--border);font-weight:500">${STATE.target[i]}</td>`;
+    for (let j = 0; j < numIn; j++) {
+      const color = mask[i][j] === 1 ? 'rgba(52,211,153,0.3)' : 'rgba(248,113,113,0.3)';
+      const text = mask[i][j] === 1 ? '1' : '0';
+      html += `<td style="padding:3px 6px;border:1px solid var(--border);text-align:center;background:${color}">${text}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+
+  container.innerHTML = html;
 }
 
 // ═══════════════════════════════════════════

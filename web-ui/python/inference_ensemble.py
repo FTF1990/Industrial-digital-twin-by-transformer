@@ -3,8 +3,10 @@
 Ensemble Inference Script - Stage1 + Stage2 Combined
 
 Performs inference with selective boosting:
-  - Signals with high Stage1 R² → use Stage1 only
-  - Signals with low Stage1 R² → apply Stage2 residual correction
+  - Signals with high Stage1 R² -> use Stage1 only
+  - Signals with low Stage1 R² -> apply Stage2 residual correction
+
+Supports both SST and MaskedSST model types (auto-detected from checkpoint).
 
 Usage:
     python inference_ensemble.py --stage1_model stage1.pth --stage1_scalers stage1_scalers.pkl \
@@ -26,7 +28,8 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
-from models.static_transformer import StaticSensorTransformer
+WEBUI_PYTHON = os.path.dirname(__file__)
+sys.path.insert(0, WEBUI_PYTHON)
 
 
 def emit(msg_type, **kwargs):
@@ -34,25 +37,46 @@ def emit(msg_type, **kwargs):
     print(json.dumps(msg, ensure_ascii=False), flush=True)
 
 
-def load_model(model_path, device):
-    """Load an SST model from checkpoint."""
+def load_model_auto(model_path, device):
+    """Load model from checkpoint, auto-detecting SST vs MaskedSST."""
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+    model_type = checkpoint.get('model_type', 'SST')
     cfg = checkpoint['model_config']
-    model = StaticSensorTransformer(
-        num_boundary_sensors=cfg['num_boundary_sensors'],
-        num_target_sensors=cfg['num_target_sensors'],
-        d_model=cfg['d_model'],
-        nhead=cfg['nhead'],
-        num_layers=cfg['num_layers'],
-        dropout=cfg.get('dropout', 0.1)
-    ).to(device)
+
+    if model_type == 'MaskedSST':
+        from models.masked_sst import MaskedSST
+        signal_mapping_data = checkpoint.get('signal_mapping', {})
+        mask = None
+        if 'mask_matrix' in signal_mapping_data:
+            mask = torch.tensor(signal_mapping_data['mask_matrix'], dtype=torch.float32)
+
+        model = MaskedSST(
+            num_input_signals=cfg['num_input_signals'],
+            num_output_signals=cfg['num_output_signals'],
+            d_model=cfg['d_model'],
+            nhead=cfg['nhead'],
+            num_layers=cfg['num_layers'],
+            dropout=cfg.get('dropout', 0.1),
+            mask_matrix=mask
+        ).to(device)
+    else:
+        from models.static_transformer import StaticSensorTransformer
+        model = StaticSensorTransformer(
+            num_boundary_sensors=cfg.get('num_boundary_sensors', cfg.get('num_input_signals')),
+            num_target_sensors=cfg.get('num_target_sensors', cfg.get('num_output_signals')),
+            d_model=cfg['d_model'],
+            nhead=cfg['nhead'],
+            num_layers=cfg['num_layers'],
+            dropout=cfg.get('dropout', 0.1)
+        ).to(device)
+
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    return model
+    return model, model_type
 
 
 def batch_predict(model, X, scaler_X, scaler_y, device, batch_size=512):
-    """Batch inference: X (original scale) → predictions (original scale)."""
+    """Batch inference: X (original scale) -> predictions (original scale)."""
     X_scaled = scaler_X.transform(X)
     use_amp = device.type == 'cuda'
     preds = []
@@ -115,8 +139,9 @@ def main():
 
     # ── Load Models ──
     emit("status", stage="loading_models")
-    stage1_model = load_model(args.stage1_model, device)
-    stage2_model = load_model(args.stage2_model, device)
+    stage1_model, s1_type = load_model_auto(args.stage1_model, device)
+    stage2_model, s2_type = load_model_auto(args.stage2_model, device)
+    emit("info", message=f"Stage1: {s1_type}, Stage2: {s2_type}")
 
     with open(args.stage1_scalers, 'rb') as f:
         s1_scalers = pickle.load(f)
@@ -187,6 +212,7 @@ def main():
         'ensemble_metrics': {},
         'boosting_info': boosting_info,
         'r2_threshold': args.r2_threshold,
+        'model_types': {'stage1': s1_type, 'stage2': s2_type},
     }
 
     if y_true is not None:

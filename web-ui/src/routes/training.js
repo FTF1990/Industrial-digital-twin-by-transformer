@@ -109,6 +109,7 @@ router.get('/train-stage2', createTrainingEndpoint('train_stage2.py', (q) => {
   if (q.weight_decay) args.push('--weight_decay', q.weight_decay);
   if (q.grad_clip) args.push('--grad_clip', q.grad_clip);
   if (q.patience) args.push('--patience', q.patience);
+  if (q.stage2_mask_mode) args.push('--stage2_mask_mode', q.stage2_mask_mode);
   return args;
 }));
 
