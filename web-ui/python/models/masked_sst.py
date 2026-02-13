@@ -231,11 +231,8 @@ def load_model_from_checkpoint(checkpoint, device, mask_override=None):
             mask_matrix=mask
         ).to(device)
     else:
-        # Fallback to original SST
-        import sys, os
-        PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-        sys.path.insert(0, PROJECT_ROOT)
-        from models.static_transformer import StaticSensorTransformer
+        # Fallback to original SST (local copy)
+        from .static_transformer import StaticSensorTransformer
 
         model = StaticSensorTransformer(
             num_boundary_sensors=cfg.get('num_boundary_sensors', cfg.get('num_input_signals')),
